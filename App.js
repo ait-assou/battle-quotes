@@ -134,7 +134,7 @@ export default function App() {
       try {
         const onboardingComplete = await AsyncStorage.getItem('@onboarding_complete');
         const nickname = await AsyncStorage.getItem('@user_nickname');
-        
+
         if (nickname) {
           setUserNickname(nickname);
         }
@@ -394,9 +394,13 @@ export default function App() {
             ) : (
               <>
                 {/* Quote 1 */}
-                <TouchableOpacity style={styles.quoteContainer} onPress={() => handleVote('q1')} activeOpacity={0.8}>
+                <TouchableOpacity 
+                  style={[styles.quoteContainer, styles.quoteCardQ1]} 
+                  onPress={() => handleVote('q1')} 
+                  activeOpacity={0.8}
+                >
                   <View style={styles.quoteMarkContainerLeft}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.2)' }]}>“</Text>
+                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>“</Text>
                   </View>
                   <Text
                     style={[styles.quoteText, { color: '#ff3b30' }]}
@@ -406,12 +410,12 @@ export default function App() {
                     {activeQuotes.q1.text || activeQuotes.q1}
                   </Text>
                   {(activeQuotes.q1.author || false) && (
-                    <Text style={[styles.authorText, { color: 'rgba(255, 59, 48, 0.7)' }]}>
+                    <Text style={[styles.authorText, { color: 'rgba(255, 59, 48, 0.75)' }]}>
                       — {activeQuotes.q1.author}
                     </Text>
                   )}
                   <View style={styles.quoteMarkContainerRight}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.2)' }]}>”</Text>
+                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>”</Text>
                   </View>
                 </TouchableOpacity>
 
@@ -450,9 +454,13 @@ export default function App() {
                 </View>
 
                 {/* Quote 2 */}
-                <TouchableOpacity style={styles.quoteContainer} onPress={() => handleVote('q2')} activeOpacity={0.8}>
+                <TouchableOpacity 
+                  style={[styles.quoteContainer, styles.quoteCardQ2]} 
+                  onPress={() => handleVote('q2')} 
+                  activeOpacity={0.8}
+                >
                   <View style={styles.quoteMarkContainerLeft}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.2)' }]}>“</Text>
+                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>“</Text>
                   </View>
                   <Text
                     style={[styles.quoteText, { color: '#fcd53f' }]}
@@ -462,12 +470,12 @@ export default function App() {
                     {activeQuotes.q2.text || activeQuotes.q2}
                   </Text>
                   {(activeQuotes.q2.author || false) && (
-                    <Text style={[styles.authorText, { color: 'rgba(252, 213, 63, 0.7)' }]}>
+                    <Text style={[styles.authorText, { color: 'rgba(252, 213, 63, 0.75)' }]}>
                       — {activeQuotes.q2.author}
                     </Text>
                   )}
                   <View style={styles.quoteMarkContainerRight}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.2)' }]}>”</Text>
+                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>”</Text>
                   </View>
                 </TouchableOpacity>
               </>
@@ -754,8 +762,8 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
 
         {/* 10 PRE-DEFINED CHAMPIONS */}
         <View style={[adminStyles.sectionContainer, { marginTop: 15 }]}>
-          <TouchableOpacity 
-            style={adminStyles.predefinedHeader} 
+          <TouchableOpacity
+            style={adminStyles.predefinedHeader}
             onPress={() => setShowPredefined(!showPredefined)}
             activeOpacity={0.7}
           >
@@ -765,7 +773,7 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
             </View>
             <Ionicons name={showPredefined ? "chevron-up" : "chevron-down"} size={20} color="#ff3b30" />
           </TouchableOpacity>
-          
+
           {showPredefined && (
             <View style={adminStyles.predefinedList}>
               {PREDEFINED_QUOTES.map((item, idx) => (
@@ -1271,52 +1279,65 @@ const styles = StyleSheet.create({
   },
   quoteContainer: {
     height: '42%',
-    backgroundColor: '#111',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#333',
-    padding: 20,
-    marginVertical: 10,
-    marginHorizontal: 15,
-    alignItems: 'stretch',
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 24,
+    borderWidth: 1.5,
+    paddingHorizontal: 30,
+    paddingTop: 35,
+    paddingBottom: 25,
+    marginVertical: 6,
+    marginHorizontal: 10,
     justifyContent: 'center',
     position: 'relative',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  quoteCardQ1: {
+    borderColor: 'rgba(255, 59, 48, 0.18)',
+    shadowColor: '#ff3b30',
+  },
+  quoteCardQ2: {
+    borderColor: 'rgba(252, 213, 63, 0.18)',
+    shadowColor: '#fcd53f',
   },
   quoteText: {
     fontFamily: 'BebasNeue',
     fontSize: width > 380 ? 24 : 20,
     color: '#ffffff',
     textAlign: 'left',
-    letterSpacing: 1,
+    letterSpacing: 1.2,
+    lineHeight: width > 380 ? 28 : 24,
     zIndex: 2,
     textTransform: 'uppercase',
   },
   authorText: {
     fontFamily: 'BebasNeue',
-    fontSize: 16,
-    marginTop: 10,
+    fontSize: 14,
+    marginTop: 60,
     alignSelf: 'flex-end',
     letterSpacing: 2,
     zIndex: 2,
-    marginRight: 20,
+    marginRight: 10,
     textTransform: 'uppercase',
   },
   quoteMarkContainerLeft: {
     position: 'absolute',
-    top: -20,
-    left: 5,
+    top: 5,
+    left: 10,
     zIndex: 1,
   },
   quoteMarkContainerRight: {
     position: 'absolute',
-    bottom: -20,
-    right: 5,
+    bottom: 5,
+    right: 10,
     zIndex: 1,
   },
   quoteMark: {
     fontFamily: 'BebasNeue',
-    fontSize: 100,
-    lineHeight: 100,
+    fontSize: 70,
+    lineHeight: 70,
   },
   vsContainer: {
     flexDirection: 'row',
