@@ -38,6 +38,18 @@ export default function App() {
   const glowOpacity = useRef(new Animated.Value(0.4)).current;
   const instructionOpacity = useRef(new Animated.Value(1)).current;
 
+  // Neon card pulsing border animation values
+  const glowQ1Val = useRef(new Animated.Value(0.4)).current;
+  const glowQ2Val = useRef(new Animated.Value(0.4)).current;
+
+  // Slide entrance challenger animation values
+  const slideQ1Val = useRef(new Animated.Value(0)).current;
+  const slideQ2Val = useRef(new Animated.Value(0)).current;
+
+  // Track quote changes to trigger challenger animations
+  const prevQ1Text = useRef("");
+  const prevQ2Text = useRef("");
+
   // Broadcast channel ref for real-time push (no DB table needed)
   const broadcastChannelRef = useRef(null);
 
@@ -128,6 +140,41 @@ export default function App() {
         })
       ]),
       { iterations: 2 }
+    ).start();
+
+    // Pulse loops for Q1 and Q2 neon card borders
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowQ1Val, {
+          toValue: 0.95,
+          duration: 1800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowQ1Val, {
+          toValue: 0.35,
+          duration: 1800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        })
+      ])
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowQ2Val, {
+          toValue: 0.95,
+          duration: 1800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowQ2Val, {
+          toValue: 0.35,
+          duration: 1800,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        })
+      ])
     ).start();
 
     const checkOnboarding = async () => {
@@ -224,6 +271,38 @@ export default function App() {
     };
 
   }, [vsScale, glowOpacity]);
+
+  useEffect(() => {
+    if (activeQuotes.q1) {
+      const text = activeQuotes.q1.text || activeQuotes.q1;
+      if (text !== prevQ1Text.current) {
+        prevQ1Text.current = text;
+        slideQ1Val.setValue(350); // slide Q1 in from the right
+        Animated.spring(slideQ1Val, {
+          toValue: 0,
+          tension: 30,
+          friction: 7,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+  }, [activeQuotes.q1]);
+
+  useEffect(() => {
+    if (activeQuotes.q2) {
+      const text = activeQuotes.q2.text || activeQuotes.q2;
+      if (text !== prevQ2Text.current) {
+        prevQ2Text.current = text;
+        slideQ2Val.setValue(-350); // slide Q2 in from the left
+        Animated.spring(slideQ2Val, {
+          toValue: 0,
+          tension: 30,
+          friction: 7,
+          useNativeDriver: true,
+        }).start();
+      }
+    }
+  }, [activeQuotes.q2]);
 
   const handleVote = async (choice) => {
     if (hasVoted) return;
@@ -433,30 +512,36 @@ export default function App() {
             ) : (
               <>
                 {/* Quote 1 */}
-                <TouchableOpacity 
-                  style={[styles.quoteContainer, styles.quoteCardQ1]} 
-                  onPress={() => handleVote('q1')} 
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.quoteMarkContainerLeft}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>“</Text>
-                  </View>
-                  <Text
-                    style={[styles.quoteText, { color: '#ff3b30' }]}
-                    adjustsFontSizeToFit
-                    numberOfLines={8}
+                <Animated.View style={{ transform: [{ translateX: slideQ1Val }] }}>
+                  <TouchableOpacity 
+                    style={styles.quoteContainer} 
+                    onPress={() => handleVote('q1')} 
+                    activeOpacity={0.8}
                   >
-                    {activeQuotes.q1.text || activeQuotes.q1}
-                  </Text>
-                  {(activeQuotes.q1.author || false) && (
-                    <Text style={[styles.authorText, { color: 'rgba(255, 59, 48, 0.75)' }]}>
-                      — {activeQuotes.q1.author}
+                    {/* Pulsing Neon Border */}
+                    <Animated.View 
+                      style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]} 
+                      pointerEvents="none"
+                    />
+
+                    <View style={styles.quoteMarkContainerLeft}>
+                      <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>“</Text>
+                    </View>
+                    <Text
+                      style={[styles.quoteText, { color: '#ff3b30' }]}
+                    >
+                      {activeQuotes.q1.text || activeQuotes.q1}
                     </Text>
-                  )}
-                  <View style={styles.quoteMarkContainerRight}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>”</Text>
-                  </View>
-                </TouchableOpacity>
+                    {(activeQuotes.q1.author || false) && (
+                      <Text style={[styles.authorText, { color: 'rgba(255, 59, 48, 0.75)' }]}>
+                        — {activeQuotes.q1.author}
+                      </Text>
+                    )}
+                    <View style={styles.quoteMarkContainerRight}>
+                      <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>”</Text>
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
 
                 {/* VS Divider */}
                 <View style={styles.vsContainer}>
@@ -493,30 +578,36 @@ export default function App() {
                 </View>
 
                 {/* Quote 2 */}
-                <TouchableOpacity 
-                  style={[styles.quoteContainer, styles.quoteCardQ2]} 
-                  onPress={() => handleVote('q2')} 
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.quoteMarkContainerLeft}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>“</Text>
-                  </View>
-                  <Text
-                    style={[styles.quoteText, { color: '#fcd53f' }]}
-                    adjustsFontSizeToFit
-                    numberOfLines={8}
+                <Animated.View style={{ transform: [{ translateX: slideQ2Val }] }}>
+                  <TouchableOpacity 
+                    style={styles.quoteContainer} 
+                    onPress={() => handleVote('q2')} 
+                    activeOpacity={0.8}
                   >
-                    {activeQuotes.q2.text || activeQuotes.q2}
-                  </Text>
-                  {(activeQuotes.q2.author || false) && (
-                    <Text style={[styles.authorText, { color: 'rgba(252, 213, 63, 0.75)' }]}>
-                      — {activeQuotes.q2.author}
+                    {/* Pulsing Neon Border */}
+                    <Animated.View 
+                      style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]} 
+                      pointerEvents="none"
+                    />
+
+                    <View style={styles.quoteMarkContainerLeft}>
+                      <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>“</Text>
+                    </View>
+                    <Text
+                      style={[styles.quoteText, { color: '#fcd53f' }]}
+                    >
+                      {activeQuotes.q2.text || activeQuotes.q2}
                     </Text>
-                  )}
-                  <View style={styles.quoteMarkContainerRight}>
-                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>”</Text>
-                  </View>
-                </TouchableOpacity>
+                    {(activeQuotes.q2.author || false) && (
+                      <Text style={[styles.authorText, { color: 'rgba(252, 213, 63, 0.75)' }]}>
+                        — {activeQuotes.q2.author}
+                      </Text>
+                    )}
+                    <View style={styles.quoteMarkContainerRight}>
+                      <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>”</Text>
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
               </>
             )}
           </View>
@@ -1372,10 +1463,9 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   quoteContainer: {
-    height: '42%',
+    minHeight: 170,
     backgroundColor: 'rgba(255, 255, 255, 0.03)',
     borderRadius: 24,
-    borderWidth: 1.5,
     paddingHorizontal: 30,
     paddingTop: 35,
     paddingBottom: 25,
@@ -1383,37 +1473,45 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
     justifyContent: 'center',
     position: 'relative',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 4,
+  },
+  glowBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 24,
+    borderWidth: 1.8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 15,
+    elevation: 6,
   },
   quoteCardQ1: {
-    borderColor: 'rgba(255, 59, 48, 0.18)',
+    borderColor: 'rgba(255, 59, 48, 0.45)',
     shadowColor: '#ff3b30',
   },
   quoteCardQ2: {
-    borderColor: 'rgba(252, 213, 63, 0.18)',
+    borderColor: 'rgba(252, 213, 63, 0.45)',
     shadowColor: '#fcd53f',
   },
   quoteText: {
     fontFamily: 'BebasNeue',
-    fontSize: width > 380 ? 24 : 20,
+    fontSize: width > 380 ? 21 : 18,
     color: '#ffffff',
-    textAlign: 'left',
+    textAlign: 'center',
     letterSpacing: 1.2,
-    lineHeight: width > 380 ? 28 : 24,
+    lineHeight: width > 380 ? 27 : 23,
     zIndex: 2,
     textTransform: 'uppercase',
   },
   authorText: {
     fontFamily: 'BebasNeue',
-    fontSize: 14,
-    marginTop: 60,
-    alignSelf: 'flex-end',
+    fontSize: 15,
+    marginTop: 45,
+    alignSelf: 'center',
     letterSpacing: 2,
     zIndex: 2,
-    marginRight: 10,
     textTransform: 'uppercase',
   },
   quoteMarkContainerLeft: {
