@@ -1,7 +1,7 @@
 import 'react-native-url-polyfill/auto';
 import React, { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, Animated, Easing, Dimensions, Platform, TouchableOpacity, TextInput, Alert, ActivityIndicator, Modal, FlatList, ImageBackground, PanResponder } from 'react-native';
+import { StyleSheet, Text, View, Animated, Easing, Dimensions, Platform, TouchableOpacity, TextInput, Alert, ActivityIndicator, Modal, FlatList, ImageBackground, PanResponder, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts, BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
@@ -17,7 +17,11 @@ export default function App() {
   });
 
   const [hasVoted, setHasVoted] = useState(false);
-  const [votes, setVotes] = useState({ q1: 154, q2: 98 });
+  const [votes, setVotes] = useState({ q1: 0, q2: 0 });
+  const [activeQuotes, setActiveQuotes] = useState({
+    q1: null,
+    q2: null
+  });
   const [customQuote, setCustomQuote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [quoteSubmitted, setQuoteSubmitted] = useState(false);
@@ -27,10 +31,59 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoginVisible, setIsLoginVisible] = useState(false);
   const [tapCount, setTapCount] = useState(0);
+  const [userNickname, setUserNickname] = useState('ANONYME');
+  const [showNicknameModal, setShowNicknameModal] = useState(false);
 
   const vsScale = useRef(new Animated.Value(1)).current;
   const glowOpacity = useRef(new Animated.Value(0.4)).current;
   const instructionOpacity = useRef(new Animated.Value(1)).current;
+
+  // Broadcast channel ref for real-time push (no DB table needed)
+  const broadcastChannelRef = useRef(null);
+
+  const fetchActiveQuotes = async () => {
+    try {
+      // Fetch active combat state from user_quotes where slot is marked
+      const { data, error } = await supabase
+        .from('user_quotes')
+        .select('*')
+        .not('active_slot', 'is', null);
+
+      if (error) throw error;
+
+      const newQuotes = { q1: null, q2: null };
+      if (data && data.length > 0) {
+        data.forEach(item => {
+          const slot = item.active_slot;
+          if (slot === 'q1' || slot === 'q2') {
+            // Parse "text — author" format or use text + author columns
+            const parts = item.quote.split(' — ');
+            newQuotes[slot] = {
+              text: parts[0] || item.quote,
+              author: parts[1] || item.author || 'ANONYME'
+            };
+          }
+        });
+      }
+      setActiveQuotes(newQuotes);
+
+      // Count votes
+      const { data: votesData, error: votesError } = await supabase
+        .from('votes')
+        .select('quote_id');
+      if (!votesError && votesData) {
+        let q1Count = 0;
+        let q2Count = 0;
+        votesData.forEach(v => {
+          if (v.quote_id === 'q1') q1Count++;
+          if (v.quote_id === 'q2') q2Count++;
+        });
+        setVotes({ q1: q1Count, q2: q2Count });
+      }
+    } catch (e) {
+      console.log('Error fetching active combat quotes:', e);
+    }
+  };
 
   useEffect(() => {
     // Instruction fade out after 2 seconds
@@ -79,14 +132,23 @@ export default function App() {
 
     const checkOnboarding = async () => {
       try {
-        // ⚠️ TEMPORARY - Remove this line after testing onboarding
-        await AsyncStorage.removeItem('@onboarding_complete');
-        const value = await AsyncStorage.getItem('@onboarding_complete');
-        if (value !== 'true') {
-          setShowOnboarding(true);
+        const onboardingComplete = await AsyncStorage.getItem('@onboarding_complete');
+        const nickname = await AsyncStorage.getItem('@user_nickname');
+        
+        if (nickname) {
+          setUserNickname(nickname);
         }
+
+        if (onboardingComplete !== 'true') {
+          setShowOnboarding(true);
+        } else if (!nickname) {
+          setShowNicknameModal(true);
+        }
+
+        // Fetch persisted active quotes from DB
+        await fetchActiveQuotes();
       } catch (e) {
-        console.log('Error checking onboarding:', e);
+        console.log('Error checking onboarding/quotes:', e);
       }
     };
     checkOnboarding();
@@ -128,8 +190,37 @@ export default function App() {
 
     signInAnonymously();
 
+    // --- REALTIME: Broadcast channel for instant quote+vote updates ---
+    const channel = supabase
+      .channel('battle-arena-realtime')
+      // Listen for admin pushing new active quotes
+      .on('broadcast', { event: 'quotes_updated' }, (payload) => {
+        setActiveQuotes(payload.payload);
+        setVotes({ q1: 0, q2: 0 });
+        setHasVoted(false);
+      })
+      // Listen for new votes broadcast
+      .on('broadcast', { event: 'vote_cast' }, (payload) => {
+        setVotes(payload.payload);
+      })
+      // Also listen to DB changes on user_quotes and votes as fallback
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'user_quotes' },
+        () => { fetchActiveQuotes(); }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'votes' },
+        () => { fetchActiveQuotes(); }
+      )
+      .subscribe();
+
+    broadcastChannelRef.current = channel;
+
     return () => {
       subscription.unsubscribe();
+      supabase.removeChannel(channel);
     };
 
   }, [vsScale, glowOpacity]);
@@ -137,13 +228,38 @@ export default function App() {
   const handleVote = async (choice) => {
     if (hasVoted) return;
     setHasVoted(true);
+
+    // Optimistic local update
     setVotes(prev => ({
-      ...prev,
-      [choice]: prev[choice] + 1
+      q1: prev.q1 + (choice === 'q1' ? 1 : 0),
+      q2: prev.q2 + (choice === 'q2' ? 1 : 0),
     }));
 
     try {
       await supabase.from('votes').insert([{ quote_id: choice }]);
+
+      // Fetch accurate DB totals and broadcast to ALL users
+      const { data: votesData } = await supabase.from('votes').select('quote_id');
+      if (votesData) {
+        let q1Count = 0;
+        let q2Count = 0;
+        votesData.forEach(v => {
+          if (v.quote_id === 'q1') q1Count++;
+          if (v.quote_id === 'q2') q2Count++;
+        });
+        const accurateVotes = { q1: q1Count, q2: q2Count };
+        setVotes(accurateVotes);
+
+        // Broadcast accurate counts to every connected user instantly
+        if (broadcastChannelRef.current) {
+          broadcastChannelRef.current.send({
+            type: 'broadcast',
+            event: 'vote_cast',
+            payload: accurateVotes,
+          });
+        }
+      }
+
       setTimeout(() => setIsModalVisible(true), 500);
     } catch (error) {
       console.log('Error recording vote:', error);
@@ -157,7 +273,9 @@ export default function App() {
     }
     setIsSubmitting(true);
     try {
-      const { error } = await supabase.from('user_quotes').insert([{ quote: quoteText }]);
+      // Append the author's nickname to the quote using " — " delimiter
+      const quoteWithAuthor = `${quoteText.trim()} — ${userNickname}`;
+      const { error } = await supabase.from('user_quotes').insert([{ quote: quoteWithAuthor }]);
       if (error) throw error;
       setQuoteSubmitted(true);
     } catch (error) {
@@ -165,6 +283,59 @@ export default function App() {
       console.log('Submit error:', error);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleSaveNickname = async (nickname) => {
+    if (!nickname || !nickname.trim()) {
+      Alert.alert('Erreur', 'Veuillez entrer un surnom.');
+      return;
+    }
+    const cleanNickname = nickname.trim().toUpperCase();
+    try {
+      await AsyncStorage.setItem('@user_nickname', cleanNickname);
+      setUserNickname(cleanNickname);
+      setShowNicknameModal(false);
+    } catch (e) {
+      console.log('Error saving nickname:', e);
+      Alert.alert('Erreur', 'Impossible d\'enregistrer le surnom.');
+    }
+  };
+
+  const handleSetQuote = async (quoteText, authorText, slot) => {
+    const author = authorText || "ANONYME";
+    const newQuotes = { ...activeQuotes, [slot]: { text: quoteText, author } };
+    setActiveQuotes(newQuotes);
+    setVotes({ q1: 0, q2: 0 });
+    setHasVoted(false);
+
+    // --- INSTANT BROADCAST to all connected users ---
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.send({
+        type: 'broadcast',
+        event: 'quotes_updated',
+        payload: newQuotes,
+      });
+    }
+
+    // --- PERSIST to DB via user_quotes.active_slot for new users joining ---
+    try {
+      // Clear existing active slot for this position
+      await supabase
+        .from('user_quotes')
+        .update({ active_slot: null })
+        .eq('active_slot', slot);
+
+      // Insert new active quote row (or update if same text exists)
+      await supabase
+        .from('user_quotes')
+        .insert({ quote: `${quoteText} — ${author}`, active_slot: slot });
+
+      // Reset votes in DB
+      await supabase.from('votes').delete().neq('id', 0);
+    } catch (e) {
+      console.log('Error persisting active quote:', e);
+      // Broadcast already sent so users still see it live - DB persistence failed silently
     }
   };
 
@@ -203,81 +374,125 @@ export default function App() {
           </View>
 
           <View style={styles.content}>
-            {/* Quote 1 */}
-            <TouchableOpacity style={[styles.quoteContainer, { marginTop: 60 }]} onPress={() => handleVote('q1')} activeOpacity={0.8}>
-              <View style={styles.quoteMarkContainerLeft}>
-                <Text style={[styles.quoteMark, { color: '#ff3b30' }]}>“</Text>
-              </View>
-              <Text style={[styles.quoteText, { color: '#ff3b30' }]}>
-                TU VEUX DES RÉSULTATS ?{'\n'}
-                ARRÊTE DE NÉGOCIER{'\n'}
-                AVEC TES EFFORTS.
-              </Text>
-              <View style={styles.quoteMarkContainerRight}>
-                <Text style={[styles.quoteMark, { color: '#ff3b30' }]}>”</Text>
-              </View>
-            </TouchableOpacity>
-
-            {/* VS Divider */}
-            <View style={styles.vsContainer}>
-              <View style={styles.dividerSide}>
-                {hasVoted && (
-                  <Text style={[styles.vsPercent, { color: '#ff3b30', textAlign: 'left' }]}>{q1Percent}%</Text>
+            {!activeQuotes.q1 || !activeQuotes.q2 ? (
+              <View style={styles.emptyArenaContainer}>
+                <MaterialCommunityIcons name="sword-cross" size={80} color="#ff3b30" style={{ marginBottom: 15 }} />
+                <Text style={styles.emptyArenaTitle}>L'ARÈNE EST VIDE</Text>
+                <Text style={styles.emptyArenaSubtitle}>Aucun combat en cours</Text>
+                <Text style={styles.emptyArenaDescription}>
+                  L'admin (me@you.com) doit sélectionner deux citations dans le panel d'administration pour lancer le premier combat !
+                </Text>
+                {isAdmin && (
+                  <TouchableOpacity
+                    style={styles.emptyArenaAdminBtn}
+                    onPress={() => setIsAdminVisible(true)}
+                  >
+                    <Text style={styles.emptyArenaAdminBtnText}>ACCÉDER AU PANEL ADMIN</Text>
+                  </TouchableOpacity>
                 )}
-                <View style={styles.dividerLineWrapper}>
-                  <LinearGradient
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    colors={['transparent', 'rgba(255, 0, 0, 0.8)', 'transparent']}
-                    style={styles.dividerLineGradient}
-                  />
+              </View>
+            ) : (
+              <>
+                {/* Quote 1 */}
+                <TouchableOpacity style={styles.quoteContainer} onPress={() => handleVote('q1')} activeOpacity={0.8}>
+                  <View style={styles.quoteMarkContainerLeft}>
+                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.2)' }]}>“</Text>
+                  </View>
+                  <Text
+                    style={[styles.quoteText, { color: '#ff3b30' }]}
+                    adjustsFontSizeToFit
+                    numberOfLines={8}
+                  >
+                    {activeQuotes.q1.text || activeQuotes.q1}
+                  </Text>
+                  {(activeQuotes.q1.author || false) && (
+                    <Text style={[styles.authorText, { color: 'rgba(255, 59, 48, 0.7)' }]}>
+                      — {activeQuotes.q1.author}
+                    </Text>
+                  )}
+                  <View style={styles.quoteMarkContainerRight}>
+                    <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.2)' }]}>”</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* VS Divider */}
+                <View style={styles.vsContainer}>
+                  <View style={styles.dividerSide}>
+                    {(votes.q1 + votes.q2) > 0 && (
+                      <Text style={[styles.vsPercent, { color: '#ff3b30', textAlign: 'left' }]}>{q1Percent}%</Text>
+                    )}
+                    <View style={styles.dividerLineWrapper}>
+                      <LinearGradient
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                        colors={['transparent', 'rgba(255, 0, 0, 0.8)', 'transparent']}
+                        style={styles.dividerLineGradient}
+                      />
+                    </View>
+                  </View>
+
+                  <Animated.View style={[styles.vsTextContainer, { transform: [{ scale: vsScale }] }]}>
+                    <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
+                    <Text style={styles.vsText}>VS</Text>
+                  </Animated.View>
+
+                  <View style={styles.dividerSide}>
+                    {(votes.q1 + votes.q2) > 0 && (
+                      <Text style={[styles.vsPercent, { color: '#fcd53f', textAlign: 'right' }]}>{q2Percent}%</Text>
+                    )}
+                    <View style={styles.dividerLineWrapper}>
+                      <LinearGradient
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                        colors={['transparent', 'rgba(255, 0, 0, 0.8)', 'transparent']}
+                        style={styles.dividerLineGradient}
+                      />
+                    </View>
+                  </View>
                 </View>
-              </View>
 
-              <Animated.View style={[styles.vsTextContainer, { transform: [{ scale: vsScale }] }]}>
-                <Animated.View style={[styles.glow, { opacity: glowOpacity }]} />
-                <Text style={styles.vsText}>VS</Text>
-              </Animated.View>
-
-              <View style={styles.dividerSide}>
-                {hasVoted && (
-                  <Text style={[styles.vsPercent, { color: '#fcd53f', textAlign: 'right' }]}>{q2Percent}%</Text>
-                )}
-                <View style={styles.dividerLineWrapper}>
-                  <LinearGradient
-                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-                    colors={['transparent', 'rgba(255, 0, 0, 0.8)', 'transparent']}
-                    style={styles.dividerLineGradient}
-                  />
-                </View>
-              </View>
-            </View>
-
-            {/* Quote 2 */}
-            <TouchableOpacity style={styles.quoteContainer} onPress={() => handleVote('q2')} activeOpacity={0.8}>
-              <View style={styles.quoteMarkContainerLeft}>
-                <Text style={[styles.quoteMark, { color: '#fcd53f' }]}>“</Text>
-              </View>
-              <Text style={[styles.quoteText, { color: '#fcd53f' }]}>
-                LES EXCUSES TE RASSURENT,{'\n'}
-                MAIS ELLES NE TE FERONT{'\n'}
-                JAMAIS AVANCER.
-              </Text>
-              <View style={styles.quoteMarkContainerRight}>
-                <Text style={[styles.quoteMark, { color: '#fcd53f' }]}>”</Text>
-              </View>
-            </TouchableOpacity>
+                {/* Quote 2 */}
+                <TouchableOpacity style={styles.quoteContainer} onPress={() => handleVote('q2')} activeOpacity={0.8}>
+                  <View style={styles.quoteMarkContainerLeft}>
+                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.2)' }]}>“</Text>
+                  </View>
+                  <Text
+                    style={[styles.quoteText, { color: '#fcd53f' }]}
+                    adjustsFontSizeToFit
+                    numberOfLines={8}
+                  >
+                    {activeQuotes.q2.text || activeQuotes.q2}
+                  </Text>
+                  {(activeQuotes.q2.author || false) && (
+                    <Text style={[styles.authorText, { color: 'rgba(252, 213, 63, 0.7)' }]}>
+                      — {activeQuotes.q2.author}
+                    </Text>
+                  )}
+                  <View style={styles.quoteMarkContainerRight}>
+                    <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.2)' }]}>”</Text>
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
 
           {/* Vote Section / Submit Section */}
           <View style={styles.voteSection}>
             <View style={styles.bottomStateContainer}>
-              {!hasVoted && (
+              {!hasVoted && activeQuotes.q1 && activeQuotes.q2 && (
                 <Animated.View style={[styles.bottomInstructionContainer, { opacity: instructionOpacity }]}>
                   <MaterialCommunityIcons name="lightning-bolt" size={20} color="#ff3b30" />
                   <Animated.Text style={[styles.tapToVoteText, { opacity: glowOpacity }]}>
                     VOTE ET ENTRE DANS LA BATTLE
                   </Animated.Text>
                   <MaterialCommunityIcons name="lightning-bolt" size={20} color="#ff3b30" />
+                </Animated.View>
+              )}
+              {(!activeQuotes.q1 || !activeQuotes.q2) && (
+                <Animated.View style={[styles.bottomInstructionContainer, { opacity: instructionOpacity }]}>
+                  <MaterialCommunityIcons name="lock-outline" size={20} color="#666" />
+                  <Text style={[styles.tapToVoteText, { color: '#666', textShadowColor: 'transparent' }]}>
+                    COMBAT VERROUILLÉ
+                  </Text>
+                  <MaterialCommunityIcons name="lock-outline" size={20} color="#666" />
                 </Animated.View>
               )}
             </View>
@@ -287,6 +502,7 @@ export default function App() {
               onClose={() => setIsModalVisible(false)}
               results={{ q1: q1Percent, q2: q2Percent }}
               onSubmit={submitCustomQuote}
+              nickname={userNickname}
             />
           </View>
 
@@ -295,7 +511,16 @@ export default function App() {
             onClose={async () => {
               setShowOnboarding(false);
               await AsyncStorage.setItem('@onboarding_complete', 'true');
+              const nickname = await AsyncStorage.getItem('@user_nickname');
+              if (!nickname) {
+                setShowNicknameModal(true);
+              }
             }}
+          />
+
+          <NicknameModal
+            visible={showNicknameModal}
+            onSubmit={handleSaveNickname}
           />
 
           {/* Admin Gear Button - Only visible to Admins */}
@@ -311,6 +536,9 @@ export default function App() {
           <AdminSettingsModal
             visible={isAdminVisible}
             onClose={() => setIsAdminVisible(false)}
+            onSetQuote={handleSetQuote}
+            activeQuotes={activeQuotes}
+            votes={votes}
           />
 
           <LoginModal
@@ -350,52 +578,73 @@ function LoginModal({ visible, onClose }) {
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <View style={adminStyles.overlay}>
-        <View style={[adminStyles.container, { height: 'auto', marginBottom: 20, borderRadius: 20 }]}>
-          <View style={adminStyles.header}>
-            <Text style={adminStyles.title}>ACCÈS ADMIN</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Text style={adminStyles.closeText}>✕</Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={adminStyles.overlay}
+        >
+          <View style={[adminStyles.container, { height: 'auto', marginBottom: 20, borderRadius: 20 }]}>
+            <View style={adminStyles.header}>
+              <Text style={adminStyles.title}>ACCÈS ADMIN</Text>
+              <TouchableOpacity onPress={onClose}>
+                <Text style={adminStyles.closeText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={modalStyles.input}
+              placeholder="Email"
+              placeholderTextColor="#888"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={modalStyles.input}
+              placeholder="Mot de passe"
+              placeholderTextColor="#888"
+              secureTextEntry
+              value={password}
+              onChangeText={setPassword}
+            />
+
+            <TouchableOpacity
+              style={[modalStyles.button, { opacity: loading ? 0.5 : 1 }]}
+              onPress={handleLogin}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={modalStyles.buttonText}>SE CONNECTER</Text>
+              )}
             </TouchableOpacity>
           </View>
-
-          <TextInput
-            style={modalStyles.input}
-            placeholder="Email"
-            placeholderTextColor="#888"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-          />
-          <TextInput
-            style={modalStyles.input}
-            placeholder="Mot de passe"
-            placeholderTextColor="#888"
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
-
-          <TouchableOpacity
-            style={[modalStyles.button, { opacity: loading ? 0.5 : 1 }]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={modalStyles.buttonText}>SE CONNECTER</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </View>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
 
-function AdminSettingsModal({ visible, onClose }) {
+const PREDEFINED_QUOTES = [
+  { text: "L'ART DE LA GUERRE C'EST DE SOUMETTRE L'ENNEMI SANS COMBATTRE.", author: "SUN TZU" },
+  { text: "LES MOTS SONT DES PIÈGES POUR LES FOUS, DES ARMES POUR LES SAGES.", author: "ANONYME" },
+  { text: "CE QUI NE ME TUE PAS ME REND PLUS FORT.", author: "NIETZSCHE" },
+  { text: "LA MEILLEURE DÉFENSE EST UNE ATTAQUE EXPLOSIVE.", author: "SUN TZU" },
+  { text: "UN GUERRIER NE RENONCE PAS À CE QU'IL AIME, IL TROUVE L'AMOUR DANS CE QU'IL FAIT.", author: "GUERRIER PACIFIQUE" },
+  { text: "L'OBSTACLE EST LE CHEMIN DE LA VICTOIRE.", author: "MARC AURÈLE" },
+  { text: "LA FORCE NE VIENT PAS DE LA CAPACITÉ PHYSIQUE, MAIS D'UNE VOLONTÉ INDOMPTABLE.", author: "GANDHI" },
+  { text: "IL N'Y A PAS DE VICTOIRE SANS SACRIFICE.", author: "ANONYME" },
+  { text: "LA SAGESSE COMMENCE DANS LE SILENCE DE LA BATAILLE.", author: "CONFUCIUS" },
+  { text: "LE SEUL VÉRITABLE ÉCHEC EST D'ARRÊTER DE COMBATTRE.", author: "ANONYME" }
+];
+
+function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes }) {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [newQuoteText, setNewQuoteText] = useState("");
+  const [newQuoteAuthor, setNewQuoteAuthor] = useState("");
+  const [showPredefined, setShowPredefined] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -412,7 +661,6 @@ function AdminSettingsModal({ visible, onClose }) {
         .order('created_at', { ascending: false });
 
       if (error) {
-        // If it's a "table not found" error, we show a specific message
         if (error.code === 'PGRST116' || error.message.includes('not found')) {
           Alert.alert('Configuration Requise', 'La table "user_quotes" n\'existe pas encore dans votre base Supabase.');
         } else {
@@ -428,59 +676,245 @@ function AdminSettingsModal({ visible, onClose }) {
     }
   };
 
-  const handleApprove = async (quote) => {
+  const handleApprove = (quoteText, authorText, slot) => {
+    if (!quoteText || !quoteText.trim()) {
+      Alert.alert('Erreur', 'Veuillez entrer une citation.');
+      return;
+    }
     Alert.alert(
       'Confirmer',
-      `Voulez-vous que cette citation devienne la prochaine challenger ?\n\n"${quote.quote}"`,
+      `Voulez-vous définir cette citation comme Quote ${slot === 'q1' ? '1 (Rouge)' : '2 (Jaune)'} ?\n\n"${quoteText}"\n— ${authorText || 'ANONYME'}`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
-          text: 'VALLIDER',
+          text: 'VALIDER',
           onPress: () => {
-            // Logic to update the "active battle" would go here
-            // For now, we just acknowledge the choice
-            Alert.alert('Succès', 'La citation a été sélectionnée pour la prochaine battle !');
+            onSetQuote(quoteText, authorText, slot);
+            setNewQuoteText(""); // clear input
+            setNewQuoteAuthor("");
+            Alert.alert('Succès', `La citation a été définie pour la Quote ${slot === 'q1' ? '1' : '2'} !`);
           }
         }
       ]
     );
   };
 
-  return (
-    <Modal visible={visible} transparent animationType="slide">
-      <View style={adminStyles.overlay}>
-        <View style={adminStyles.container}>
-          <View style={adminStyles.header}>
-            <Text style={adminStyles.title}>PANEL ADMIN</Text>
-            <TouchableOpacity onPress={onClose}>
-              <Text style={adminStyles.closeText}>✕</Text>
-            </TouchableOpacity>
-          </View>
+  const totalVotes = (votes?.q1 || 0) + (votes?.q2 || 0);
+  const q1Percent = totalVotes > 0 ? Math.round(((votes?.q1 || 0) / totalVotes) * 100) : 0;
+  const q2Percent = totalVotes > 0 ? Math.round(((votes?.q2 || 0) / totalVotes) * 100) : 0;
 
-          {loading ? (
-            <ActivityIndicator size="large" color="#ff3b30" style={{ marginTop: 50 }} />
-          ) : (
-            <FlatList
-              data={submissions}
-              keyExtractor={(item) => item.id.toString()}
-              renderItem={({ item }) => (
-                <View style={adminStyles.quoteItem}>
-                  <Text style={adminStyles.quoteText}>"{item.quote}"</Text>
-                  <TouchableOpacity
-                    style={adminStyles.approveButton}
-                    onPress={() => handleApprove(item)}
-                  >
-                    <Text style={adminStyles.approveButtonText}>DÉFINIR COMME CHALLENGER</Text>
-                  </TouchableOpacity>
-                </View>
+  const renderHeader = () => {
+    return (
+      <View style={{ paddingBottom: 10 }}>
+        {/* CURRENT BATTLE SECTION */}
+        <View style={adminStyles.sectionContainer}>
+          <Text style={adminStyles.sectionTitle}>COMBAT ACTUEL :</Text>
+          <View style={adminStyles.battleRow}>
+            {/* Quote 1 (Red) Status */}
+            <View style={[adminStyles.battleCard, { borderColor: '#ff3b30' }]}>
+              <Text style={[adminStyles.battleCardTitle, { color: '#ff3b30' }]}>QUOTE 1 (ROUGE)</Text>
+              {activeQuotes?.q1 ? (
+                <>
+                  <Text style={adminStyles.battleCardText} numberOfLines={3}>
+                    "{activeQuotes.q1.text}"
+                  </Text>
+                  <Text style={adminStyles.battleCardAuthor}>— {activeQuotes.q1.author}</Text>
+                  <View style={adminStyles.voteIndicator}>
+                    <Text style={{ color: '#ff3b30', fontFamily: 'BebasNeue', fontSize: 18 }}>
+                      {votes?.q1 || 0} VOTE(S) ({q1Percent}%)
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <Text style={adminStyles.battleCardTextEmpty}>[ VIDE / EN ATTENTE ]</Text>
               )}
-              ListEmptyComponent={
-                <Text style={adminStyles.emptyText}>Aucune citation soumise pour le moment.</Text>
-              }
-            />
+            </View>
+
+            {/* Quote 2 (Yellow) Status */}
+            <View style={[adminStyles.battleCard, { borderColor: '#fcd53f' }]}>
+              <Text style={[adminStyles.battleCardTitle, { color: '#fcd53f' }]}>QUOTE 2 (JAUNE)</Text>
+              {activeQuotes?.q2 ? (
+                <>
+                  <Text style={adminStyles.battleCardText} numberOfLines={3}>
+                    "{activeQuotes.q2.text}"
+                  </Text>
+                  <Text style={adminStyles.battleCardAuthor}>— {activeQuotes.q2.author}</Text>
+                  <View style={adminStyles.voteIndicator}>
+                    <Text style={{ color: '#fcd53f', fontFamily: 'BebasNeue', fontSize: 18 }}>
+                      {votes?.q2 || 0} VOTE(S) ({q2Percent}%)
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <Text style={adminStyles.battleCardTextEmpty}>[ VIDE / EN ATTENTE ]</Text>
+              )}
+            </View>
+          </View>
+        </View>
+
+        {/* 10 PRE-DEFINED CHAMPIONS */}
+        <View style={[adminStyles.sectionContainer, { marginTop: 15 }]}>
+          <TouchableOpacity 
+            style={adminStyles.predefinedHeader} 
+            onPress={() => setShowPredefined(!showPredefined)}
+            activeOpacity={0.7}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <MaterialCommunityIcons name="sword" size={20} color="#ff3b30" style={{ marginRight: 8 }} />
+              <Text style={adminStyles.sectionTitle}>10 CHAMPIONNES DE DÉPART :</Text>
+            </View>
+            <Ionicons name={showPredefined ? "chevron-up" : "chevron-down"} size={20} color="#ff3b30" />
+          </TouchableOpacity>
+          
+          {showPredefined && (
+            <View style={adminStyles.predefinedList}>
+              {PREDEFINED_QUOTES.map((item, idx) => (
+                <View key={idx} style={adminStyles.predefinedItem}>
+                  <Text style={adminStyles.predefinedText}>"{item.text}"</Text>
+                  <Text style={adminStyles.predefinedAuthor}>— {item.author}</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                    <TouchableOpacity
+                      style={[adminStyles.approveButton, { flex: 1, marginRight: 5, backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}
+                      onPress={() => handleApprove(item.text, item.author, 'q1')}
+                    >
+                      <Text style={[adminStyles.approveButtonText, { color: '#ff3b30' }]}>SET Q1</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[adminStyles.approveButton, { flex: 1, marginLeft: 5, backgroundColor: 'rgba(252, 213, 63, 0.2)' }]}
+                      onPress={() => handleApprove(item.text, item.author, 'q2')}
+                    >
+                      <Text style={[adminStyles.approveButtonText, { color: '#fcd53f' }]}>SET Q2</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
           )}
         </View>
+
+        {/* ADD MANUAL CUSTOM QUOTE */}
+        <View style={[adminStyles.sectionContainer, { marginTop: 20 }]}>
+          <Text style={adminStyles.sectionTitle}>AJOUTER UNE NOUVELLE CITATION :</Text>
+          <TextInput
+            style={modalStyles.input}
+            placeholder="Écris la nouvelle citation ici..."
+            placeholderTextColor="#888"
+            multiline
+            value={newQuoteText}
+            onChangeText={setNewQuoteText}
+          />
+          <TextInput
+            style={[modalStyles.input, { marginTop: 10, height: 50 }]}
+            placeholder="Auteur (ex: Sun Tzu)"
+            placeholderTextColor="#888"
+            value={newQuoteAuthor}
+            onChangeText={setNewQuoteAuthor}
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+            <TouchableOpacity
+              style={[adminStyles.approveButton, { flex: 1, marginRight: 5, backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}
+              onPress={() => handleApprove(newQuoteText, newQuoteAuthor, 'q1')}
+            >
+              <Text style={[adminStyles.approveButtonText, { color: '#ff3b30' }]}>SET Q1</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[adminStyles.approveButton, { flex: 1, marginLeft: 5, backgroundColor: 'rgba(252, 213, 63, 0.2)' }]}
+              onPress={() => handleApprove(newQuoteText, newQuoteAuthor, 'q2')}
+            >
+              <Text style={[adminStyles.approveButtonText, { color: '#fcd53f' }]}>SET Q2</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <Text style={[adminStyles.sectionTitle, { borderTopWidth: 1, borderTopColor: '#222', paddingTop: 20, marginTop: 25, marginBottom: 10 }]}>
+          CITATIONS SOUMISES :
+        </Text>
       </View>
+    );
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={adminStyles.overlay}
+        >
+          <View style={adminStyles.container}>
+            <View style={adminStyles.header}>
+              <Text style={adminStyles.title}>PANEL ADMIN</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <TouchableOpacity
+                  onPress={async () => {
+                    Alert.alert(
+                      "Déconnexion",
+                      "Voulez-vous vous déconnecter du panel Admin ?",
+                      [
+                        { text: "Annuler", style: "cancel" },
+                        {
+                          text: "Déconnexion",
+                          style: "destructive",
+                          onPress: async () => {
+                            await supabase.auth.signOut();
+                            onClose();
+                          }
+                        }
+                      ]
+                    );
+                  }}
+                  style={{ marginRight: 15 }}
+                >
+                  <Ionicons name="log-out-outline" size={24} color="#ff3b30" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={onClose}>
+                  <Text style={adminStyles.closeText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {loading && submissions.length === 0 ? (
+              <ActivityIndicator size="large" color="#ff3b30" style={{ marginTop: 50 }} />
+            ) : (
+              <FlatList
+                data={submissions}
+                keyExtractor={(item) => item.id.toString()}
+                ListHeaderComponent={renderHeader}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item }) => {
+                  const parts = item.quote.split(' — ');
+                  const quoteText = parts[0];
+                  const authorText = parts[1] || 'ANONYME';
+                  return (
+                    <View style={adminStyles.quoteItem}>
+                      <Text style={adminStyles.quoteText}>"{quoteText}"</Text>
+                      <Text style={{ color: '#ff3b30', fontFamily: 'BebasNeue', fontSize: 16, marginTop: 5, textTransform: 'uppercase' }}>
+                        PAR : {authorText}
+                      </Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 }}>
+                        <TouchableOpacity
+                          style={[adminStyles.approveButton, { flex: 1, marginRight: 5, backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}
+                          onPress={() => handleApprove(quoteText, authorText, 'q1')}
+                        >
+                          <Text style={[adminStyles.approveButtonText, { color: '#ff3b30' }]}>SET Q1</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[adminStyles.approveButton, { flex: 1, marginLeft: 5, backgroundColor: 'rgba(252, 213, 63, 0.2)' }]}
+                          onPress={() => handleApprove(quoteText, authorText, 'q2')}
+                        >
+                          <Text style={[adminStyles.approveButtonText, { color: '#fcd53f' }]}>SET Q2</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                }}
+                ListEmptyComponent={
+                  <Text style={adminStyles.emptyText}>Aucune citation soumise pour le moment.</Text>
+                }
+              />
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
@@ -515,7 +949,7 @@ function OnboardingModal({ visible, onClose }) {
       setStep(viewableItems[0].index);
     }
   }).current;
-  
+
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
   const ITEM_WIDTH = width - 60; // container padding is 30 on each side
 
@@ -587,7 +1021,7 @@ function OnboardingModal({ visible, onClose }) {
   );
 }
 
-function BattleQuoteModal({ visible, onClose, onSubmit, results }) {
+function BattleQuoteModal({ visible, onClose, onSubmit, results, nickname }) {
   const [quote, setQuote] = useState("");
   const riseAnim = useRef(new Animated.Value(500)).current;
 
@@ -615,60 +1049,143 @@ function BattleQuoteModal({ visible, onClose, onSubmit, results }) {
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <View style={modalStyles.overlay}>
-        <View style={modalStyles.container}>
-          {/* Main Modal Content */}
-          <TouchableOpacity style={modalStyles.closeBtn} onPress={onClose}>
-            <Text style={modalStyles.closeText}>✕</Text>
-          </TouchableOpacity>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={modalStyles.overlay}
+        >
+          <View style={modalStyles.container}>
+            {/* Main Modal Content */}
+            <TouchableOpacity style={modalStyles.closeBtn} onPress={onClose}>
+              <Text style={modalStyles.closeText}>✕</Text>
+            </TouchableOpacity>
 
-          <Text style={modalStyles.title}>⚔️   T'AS MIEUX ?</Text>
-          <Text style={modalStyles.subtitle}>
-            DROP  TA  <Text style={{ color: "#ff3b3b" }}>QUOTE</Text>
-          </Text>
+            <Text style={modalStyles.title}>⚔️   T'AS MIEUX ?</Text>
+            <Text style={modalStyles.subtitle}>
+              DROP  TA  <Text style={{ color: "#ff3b3b" }}>QUOTE</Text>
+            </Text>
 
-          <Text style={modalStyles.description}>
-            Entre dans l'arène et affronte la gagnante.
-          </Text>
+            <Text style={modalStyles.description}>
+              Entre dans l'arène et affronte la gagnante.
+            </Text>
 
-          <TextInput
-            style={modalStyles.input}
-            placeholder="Écris ta quote ici..."
-            placeholderTextColor="#888"
-            multiline
-            value={quote}
-            onChangeText={setQuote}
-          />
+            <TextInput
+              style={modalStyles.input}
+              placeholder="Écris ta quote ici..."
+              placeholderTextColor="#888"
+              multiline
+              value={quote}
+              onChangeText={setQuote}
+            />
 
-          <TouchableOpacity style={modalStyles.button} onPress={handleSubmit}>
-            <Text style={modalStyles.buttonText}>🔥 ENTRER DANS LA BATTLE</Text>
-          </TouchableOpacity>
+            <Text style={{ color: '#aaa', fontFamily: 'BebasNeue', fontSize: 16, marginTop: 5, marginBottom: 15, alignSelf: 'flex-start', textTransform: 'uppercase' }}>
+              AUTEUR : <Text style={{ color: '#ff3b3b' }}>{nickname || 'ANONYME'}</Text>
+            </Text>
 
-          <Text style={modalStyles.footer}>
-            Ta quote pourrait devenir la prochaine championne 👑
-          </Text>
-        </View>
+            <TouchableOpacity style={modalStyles.button} onPress={handleSubmit}>
+              <Text style={modalStyles.buttonText}>🔥 ENTRER DANS LA BATTLE</Text>
+            </TouchableOpacity>
 
-        {/* Results Box - slides up behind the main box */}
-        {results && (
-          <Animated.View
-            style={[
-              modalStyles.dropBox,
-              { transform: [{ translateY: riseAnim }] }
-            ]}
+            <Text style={modalStyles.footer}>
+              Ta quote pourrait devenir la prochaine championne 👑
+            </Text>
+          </View>
+
+          {/* Results Box - slides up behind the main box */}
+          {results && (
+            <Animated.View
+              style={[
+                modalStyles.dropBox,
+                { transform: [{ translateY: riseAnim }] }
+              ]}
+            >
+              <View style={modalStyles.dropResults}>
+                <Text style={[modalStyles.dropPercent, { color: '#fcd53f' }]}>{results.q2}%</Text>
+                <Text style={modalStyles.dropVs}>VS</Text>
+                <Text style={[modalStyles.dropPercent, { color: '#ff3b30' }]}>{results.q1}%</Text>
+              </View>
+              <View style={modalStyles.dropIndicatorContainer}>
+                <View style={[modalStyles.dropBar, { flex: results.q2, backgroundColor: '#fcd53f' }]} />
+                <View style={[modalStyles.dropBar, { flex: results.q1, backgroundColor: '#ff3b30' }]} />
+              </View>
+            </Animated.View>
+          )}
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
+    </Modal>
+  );
+}
+
+function NicknameModal({ visible, onSubmit }) {
+  const [nickname, setNickname] = useState("");
+
+  const handleSubmit = () => {
+    if (!nickname.trim()) {
+      Alert.alert("Erreur", "Veuillez entrer un surnom.");
+      return;
+    }
+    onSubmit(nickname);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={onboardingStyles.overlay}
+        >
+          <LinearGradient
+            colors={['#1a0a0a', '#050505']}
+            style={onboardingStyles.container}
           >
-            <View style={modalStyles.dropResults}>
-              <Text style={[modalStyles.dropPercent, { color: '#fcd53f' }]}>{results.q2}%</Text>
-              <Text style={modalStyles.dropVs}>VS</Text>
-              <Text style={[modalStyles.dropPercent, { color: '#ff3b30' }]}>{results.q1}%</Text>
+            <View style={{ flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' }}>
+              <MaterialCommunityIcons name="account-circle-outline" size={100} color="#ff3b30" />
+              <Text style={onboardingStyles.title}>TON SURNOM DANS L'ARÈNE</Text>
+              <Text style={[onboardingStyles.description, { marginBottom: 40 }]}>
+                Choisis un pseudo. Il sera utilisé comme signature d'auteur lorsque tu soumettras tes propres citations.
+              </Text>
+
+              <TextInput
+                style={[
+                  modalStyles.input,
+                  {
+                    width: '100%',
+                    borderColor: '#ff3b30',
+                    borderWidth: 1.5,
+                    fontSize: 22,
+                    fontFamily: 'BebasNeue',
+                    color: '#fff',
+                    textAlign: 'center',
+                    paddingVertical: 12,
+                    marginBottom: 20
+                  }
+                ]}
+                placeholder="MON PSEUDO..."
+                placeholderTextColor="#666"
+                maxLength={15}
+                autoCapitalize="characters"
+                value={nickname}
+                onChangeText={setNickname}
+              />
+
+              <TouchableOpacity
+                onPress={handleSubmit}
+                style={onboardingStyles.buttonWrapper}
+              >
+                <ImageBackground
+                  source={require('./assets/paint.png')}
+                  style={onboardingStyles.buttonImage}
+                  resizeMode="stretch"
+                >
+                  <View style={onboardingStyles.buttonTextWrapper}>
+                    <Text style={onboardingStyles.buttonText}>C'EST PARTI !</Text>
+                  </View>
+                </ImageBackground>
+              </TouchableOpacity>
             </View>
-            <View style={modalStyles.dropIndicatorContainer}>
-              <View style={[modalStyles.dropBar, { flex: results.q2, backgroundColor: '#fcd53f' }]} />
-              <View style={[modalStyles.dropBar, { flex: results.q1, backgroundColor: '#ff3b30' }]} />
-            </View>
-          </Animated.View>
-        )}
-      </View>
+          </LinearGradient>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
@@ -753,46 +1270,60 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
   },
   quoteContainer: {
-    position: 'relative',
+    height: '42%',
+    backgroundColor: '#111',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#333',
+    padding: 20,
     marginVertical: 10,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    marginHorizontal: 15,
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    position: 'relative',
   },
   quoteText: {
     fontFamily: 'BebasNeue',
-    fontSize: width > 380 ? 32 : 28,
+    fontSize: width > 380 ? 24 : 20,
     color: '#ffffff',
-    textAlign: 'center',
-    lineHeight: width > 380 ? 38 : 34,
+    textAlign: 'left',
     letterSpacing: 1,
     zIndex: 2,
-    opacity: 0.7,
+    textTransform: 'uppercase',
+  },
+  authorText: {
+    fontFamily: 'BebasNeue',
+    fontSize: 16,
+    marginTop: 10,
+    alignSelf: 'flex-end',
+    letterSpacing: 2,
+    zIndex: 2,
+    marginRight: 20,
+    textTransform: 'uppercase',
   },
   quoteMarkContainerLeft: {
     position: 'absolute',
-    top: -15,
-    left: 20,
-    opacity: 0.8,
+    top: -20,
+    left: 5,
+    zIndex: 1,
   },
   quoteMarkContainerRight: {
     position: 'absolute',
-    bottom: -25,
-    right: 20,
-    opacity: 0.8,
+    bottom: -20,
+    right: 5,
+    zIndex: 1,
   },
   quoteMark: {
     fontFamily: 'BebasNeue',
-    fontSize: 60,
-    color: '#cc0000',
-    lineHeight: 60,
+    fontSize: 100,
+    lineHeight: 100,
   },
   vsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 10,
-    height: 80,
+    height: 50,
   },
   dividerSide: {
     flex: 1,
@@ -825,7 +1356,7 @@ const styles = StyleSheet.create({
   },
   vsText: {
     fontFamily: 'BebasNeue',
-    fontSize: 65,
+    fontSize: 45,
     color: '#ff0000',
     textShadowColor: 'rgba(255, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 0 },
@@ -834,10 +1365,10 @@ const styles = StyleSheet.create({
   },
   glow: {
     position: 'absolute',
-    width: 80,
-    height: 80,
+    width: 50,
+    height: 50,
     backgroundColor: '#ff0000',
-    borderRadius: 40,
+    borderRadius: 25,
     opacity: 0.5,
   },
   voteSection: {
@@ -927,6 +1458,59 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: '#4cd964',
     marginLeft: 10,
+  },
+  emptyArenaContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    backgroundColor: '#0a0a0a',
+    borderRadius: 25,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255, 59, 48, 0.2)',
+    paddingVertical: 40,
+    marginVertical: 20,
+  },
+  emptyArenaTitle: {
+    fontFamily: 'BebasNeue',
+    fontSize: 36,
+    color: '#fff',
+    letterSpacing: 2,
+    textAlign: 'center',
+    textShadowColor: 'rgba(255, 59, 48, 0.4)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
+  },
+  emptyArenaSubtitle: {
+    fontFamily: 'BebasNeue',
+    fontSize: 20,
+    color: '#ff3b30',
+    letterSpacing: 1,
+    marginTop: 5,
+    marginBottom: 20,
+    textTransform: 'uppercase',
+  },
+  emptyArenaDescription: {
+    color: '#888',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 30,
+    paddingHorizontal: 10,
+  },
+  emptyArenaAdminBtn: {
+    backgroundColor: 'rgba(255, 59, 48, 0.15)',
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ff3b30',
+  },
+  emptyArenaAdminBtnText: {
+    fontFamily: 'BebasNeue',
+    fontSize: 16,
+    color: '#ff3b30',
+    letterSpacing: 1,
   },
 });
 
@@ -1227,5 +1811,97 @@ const adminStyles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginTop: 50,
-  }
+  },
+  sectionContainer: {
+    backgroundColor: '#111',
+    borderRadius: 15,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  sectionTitle: {
+    fontFamily: 'BebasNeue',
+    fontSize: 18,
+    color: '#aaa',
+    marginBottom: 10,
+    letterSpacing: 1,
+  },
+  battleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  battleCard: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+    borderRadius: 10,
+    borderWidth: 1.5,
+    padding: 10,
+    marginHorizontal: 4,
+    justifyContent: 'space-between',
+  },
+  battleCardTitle: {
+    fontFamily: 'BebasNeue',
+    fontSize: 12,
+    marginBottom: 8,
+    letterSpacing: 1,
+  },
+  battleCardText: {
+    color: '#eee',
+    fontSize: 12,
+    fontStyle: 'italic',
+    lineHeight: 16,
+  },
+  battleCardTextEmpty: {
+    color: '#555',
+    fontSize: 11,
+    fontFamily: 'BebasNeue',
+    textAlign: 'center',
+    marginVertical: 15,
+  },
+  battleCardAuthor: {
+    fontFamily: 'BebasNeue',
+    fontSize: 11,
+    color: '#888',
+    alignSelf: 'flex-end',
+    marginTop: 5,
+  },
+  voteIndicator: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+    paddingTop: 5,
+    alignItems: 'center',
+  },
+  predefinedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  predefinedList: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+    paddingTop: 10,
+  },
+  predefinedItem: {
+    backgroundColor: '#151515',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  predefinedText: {
+    color: '#ccc',
+    fontSize: 13,
+    fontStyle: 'italic',
+  },
+  predefinedAuthor: {
+    fontFamily: 'BebasNeue',
+    fontSize: 11,
+    color: '#ff3b30',
+    alignSelf: 'flex-end',
+    marginTop: 4,
+  },
 });
+
