@@ -273,8 +273,20 @@ export default function App() {
     }
     setIsSubmitting(true);
     try {
-      // Append the author's nickname to the quote using " — " delimiter
-      const quoteWithAuthor = `${quoteText.trim()} — ${userNickname}`;
+      const cleanQuote = quoteText.trim();
+      const quoteWithAuthor = `${cleanQuote} — ${userNickname}`;
+
+      // Check if this quote already exists in the database
+      const { data: existing, error: checkError } = await supabase
+        .from('user_quotes')
+        .select('quote')
+        .ilike('quote', `%${cleanQuote}%`);
+
+      if (!checkError && existing && existing.length > 0) {
+        Alert.alert('Doublon', 'Cette citation a déjà été partagée ! Proposez-en une autre.');
+        return;
+      }
+
       const { error } = await supabase.from('user_quotes').insert([{ quote: quoteWithAuthor }]);
       if (error) throw error;
       setQuoteSubmitted(true);
@@ -304,6 +316,33 @@ export default function App() {
 
   const handleSetQuote = async (quoteText, authorText, slot) => {
     const author = authorText || "ANONYME";
+    
+    // Check if the other slot already has the exact same quote text to prevent duplicates in active combat
+    const otherSlot = slot === 'q1' ? 'q2' : 'q1';
+    const otherQuote = activeQuotes[otherSlot];
+    if (
+      otherQuote && 
+      otherQuote.text && 
+      otherQuote.text.trim().toLowerCase() === quoteText.trim().toLowerCase()
+    ) {
+      Alert.alert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
+      return;
+    }
+
+    // Check if the admin is trying to replace the winning quote
+    const voteQ1 = votes.q1 || 0;
+    const voteQ2 = votes.q2 || 0;
+    if (voteQ1 !== voteQ2) {
+      const winnerSlot = voteQ1 > voteQ2 ? 'q1' : 'q2';
+      if (slot === winnerSlot) {
+        Alert.alert(
+          'Action Bloquée',
+          `La citation de la Quote ${slot === 'q1' ? '1' : '2'} est actuellement gagnante ! Vous ne pouvez remplacer que la citation vaincue.`
+        );
+        return;
+      }
+    }
+
     const newQuotes = { ...activeQuotes, [slot]: { text: quoteText, author } };
     setActiveQuotes(newQuotes);
     setVotes({ q1: 0, q2: 0 });
@@ -647,6 +686,148 @@ const PREDEFINED_QUOTES = [
   { text: "LE SEUL VÉRITABLE ÉCHEC EST D'ARRÊTER DE COMBATTRE.", author: "ANONYME" }
 ];
 
+function AdminHeader({
+  activeQuotes,
+  votes,
+  q1Percent,
+  q2Percent,
+  showPredefined,
+  setShowPredefined,
+  newQuoteText,
+  setNewQuoteText,
+  newQuoteAuthor,
+  setNewQuoteAuthor,
+  handleApprove
+}) {
+  return (
+    <View style={{ paddingBottom: 10 }}>
+      {/* CURRENT BATTLE SECTION */}
+      <View style={adminStyles.sectionContainer}>
+        <Text style={adminStyles.sectionTitle}>COMBAT ACTUEL :</Text>
+        <View style={adminStyles.battleRow}>
+          {/* Quote 1 (Red) Status */}
+          <View style={[adminStyles.battleCard, { borderColor: '#ff3b30' }]}>
+            <Text style={[adminStyles.battleCardTitle, { color: '#ff3b30' }]}>QUOTE 1 (ROUGE)</Text>
+            {activeQuotes?.q1 ? (
+              <>
+                <Text style={adminStyles.battleCardText} numberOfLines={3}>
+                  "{activeQuotes.q1.text}"
+                </Text>
+                <Text style={adminStyles.battleCardAuthor}>— {activeQuotes.q1.author}</Text>
+                <View style={adminStyles.voteIndicator}>
+                  <Text style={{ color: '#ff3b30', fontFamily: 'BebasNeue', fontSize: 18 }}>
+                    {votes?.q1 || 0} VOTE(S) ({q1Percent}%)
+                  </Text>
+                </View>
+              </>
+            ) : (
+              <Text style={adminStyles.battleCardTextEmpty}>[ VIDE / EN ATTENTE ]</Text>
+            )}
+          </View>
+
+          {/* Quote 2 (Yellow) Status */}
+          <View style={[adminStyles.battleCard, { borderColor: '#fcd53f' }]}>
+            <Text style={[adminStyles.battleCardTitle, { color: '#fcd53f' }]}>QUOTE 2 (JAUNE)</Text>
+            {activeQuotes?.q2 ? (
+              <>
+                <Text style={adminStyles.battleCardText} numberOfLines={3}>
+                  "{activeQuotes.q2.text}"
+                </Text>
+                <Text style={adminStyles.battleCardAuthor}>— {activeQuotes.q2.author}</Text>
+                <View style={adminStyles.voteIndicator}>
+                  <Text style={{ color: '#fcd53f', fontFamily: 'BebasNeue', fontSize: 18 }}>
+                    {votes?.q2 || 0} VOTE(S) ({q2Percent}%)
+                  </Text>
+                </View>
+              </>
+            ) : (
+              <Text style={adminStyles.battleCardTextEmpty}>[ VIDE / EN ATTENTE ]</Text>
+            )}
+          </View>
+        </View>
+      </View>
+
+      {/* 10 PRE-DEFINED CHAMPIONS */}
+      <View style={[adminStyles.sectionContainer, { marginTop: 15 }]}>
+        <TouchableOpacity
+          style={adminStyles.predefinedHeader}
+          onPress={() => setShowPredefined(!showPredefined)}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <MaterialCommunityIcons name="sword" size={20} color="#ff3b30" style={{ marginRight: 8 }} />
+            <Text style={adminStyles.sectionTitle}>10 CHAMPIONNES DE DÉPART :</Text>
+          </View>
+          <Ionicons name={showPredefined ? "chevron-up" : "chevron-down"} size={20} color="#ff3b30" />
+        </TouchableOpacity>
+
+        {showPredefined && (
+          <View style={adminStyles.predefinedList}>
+            {PREDEFINED_QUOTES.map((item, idx) => (
+              <View key={idx} style={adminStyles.predefinedItem}>
+                <Text style={adminStyles.predefinedText}>"{item.text}"</Text>
+                <Text style={adminStyles.predefinedAuthor}>— {item.author}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                  <TouchableOpacity
+                    style={[adminStyles.approveButton, { flex: 1, marginRight: 5, backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}
+                    onPress={() => handleApprove(item.text, item.author, 'q1')}
+                  >
+                    <Text style={[adminStyles.approveButtonText, { color: '#ff3b30' }]}>SET Q1</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[adminStyles.approveButton, { flex: 1, marginLeft: 5, backgroundColor: 'rgba(252, 213, 63, 0.2)' }]}
+                    onPress={() => handleApprove(item.text, item.author, 'q2')}
+                  >
+                    <Text style={[adminStyles.approveButtonText, { color: '#fcd53f' }]}>SET Q2</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+
+      {/* ADD MANUAL CUSTOM QUOTE */}
+      <View style={[adminStyles.sectionContainer, { marginTop: 20 }]}>
+        <Text style={adminStyles.sectionTitle}>AJOUTER UNE NOUVELLE CITATION :</Text>
+        <TextInput
+          style={modalStyles.input}
+          placeholder="Écris la nouvelle citation ici..."
+          placeholderTextColor="#888"
+          multiline
+          value={newQuoteText}
+          onChangeText={setNewQuoteText}
+        />
+        <TextInput
+          style={[modalStyles.input, { marginTop: 10, height: 50 }]}
+          placeholder="Auteur (ex: Sun Tzu)"
+          placeholderTextColor="#888"
+          value={newQuoteAuthor}
+          onChangeText={setNewQuoteAuthor}
+        />
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+          <TouchableOpacity
+            style={[adminStyles.approveButton, { flex: 1, marginRight: 5, backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}
+            onPress={() => handleApprove(newQuoteText, newQuoteAuthor, 'q1')}
+          >
+            <Text style={[adminStyles.approveButtonText, { color: '#ff3b30' }]}>SET Q1</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[adminStyles.approveButton, { flex: 1, marginLeft: 5, backgroundColor: 'rgba(252, 213, 63, 0.2)' }]}
+            onPress={() => handleApprove(newQuoteText, newQuoteAuthor, 'q2')}
+          >
+            <Text style={[adminStyles.approveButtonText, { color: '#fcd53f' }]}>SET Q2</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Text style={[adminStyles.sectionTitle, { borderTopWidth: 1, borderTopColor: '#222', paddingTop: 20, marginTop: 25, marginBottom: 10 }]}>
+        CITATIONS SOUMISES :
+      </Text>
+    </View>
+  );
+}
+
 function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes }) {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -689,6 +870,33 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
       Alert.alert('Erreur', 'Veuillez entrer une citation.');
       return;
     }
+
+    // Check if the other slot already has the exact same quote text to prevent duplicates in active combat
+    const otherSlot = slot === 'q1' ? 'q2' : 'q1';
+    const otherQuote = activeQuotes[otherSlot];
+    if (
+      otherQuote && 
+      otherQuote.text && 
+      otherQuote.text.trim().toLowerCase() === quoteText.trim().toLowerCase()
+    ) {
+      Alert.alert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
+      return;
+    }
+
+    // Check if the admin is trying to replace the winning quote
+    const voteQ1 = votes?.q1 || 0;
+    const voteQ2 = votes?.q2 || 0;
+    if (voteQ1 !== voteQ2) {
+      const winnerSlot = voteQ1 > voteQ2 ? 'q1' : 'q2';
+      if (slot === winnerSlot) {
+        Alert.alert(
+          'Action Bloquée',
+          `La citation de la Quote ${slot === 'q1' ? '1' : '2'} est actuellement gagnante ! Vous ne pouvez remplacer que la citation vaincue.`
+        );
+        return;
+      }
+    }
+
     Alert.alert(
       'Confirmer',
       `Voulez-vous définir cette citation comme Quote ${slot === 'q1' ? '1 (Rouge)' : '2 (Jaune)'} ?\n\n"${quoteText}"\n— ${authorText || 'ANONYME'}`,
@@ -711,135 +919,7 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
   const q1Percent = totalVotes > 0 ? Math.round(((votes?.q1 || 0) / totalVotes) * 100) : 0;
   const q2Percent = totalVotes > 0 ? Math.round(((votes?.q2 || 0) / totalVotes) * 100) : 0;
 
-  const renderHeader = () => {
-    return (
-      <View style={{ paddingBottom: 10 }}>
-        {/* CURRENT BATTLE SECTION */}
-        <View style={adminStyles.sectionContainer}>
-          <Text style={adminStyles.sectionTitle}>COMBAT ACTUEL :</Text>
-          <View style={adminStyles.battleRow}>
-            {/* Quote 1 (Red) Status */}
-            <View style={[adminStyles.battleCard, { borderColor: '#ff3b30' }]}>
-              <Text style={[adminStyles.battleCardTitle, { color: '#ff3b30' }]}>QUOTE 1 (ROUGE)</Text>
-              {activeQuotes?.q1 ? (
-                <>
-                  <Text style={adminStyles.battleCardText} numberOfLines={3}>
-                    "{activeQuotes.q1.text}"
-                  </Text>
-                  <Text style={adminStyles.battleCardAuthor}>— {activeQuotes.q1.author}</Text>
-                  <View style={adminStyles.voteIndicator}>
-                    <Text style={{ color: '#ff3b30', fontFamily: 'BebasNeue', fontSize: 18 }}>
-                      {votes?.q1 || 0} VOTE(S) ({q1Percent}%)
-                    </Text>
-                  </View>
-                </>
-              ) : (
-                <Text style={adminStyles.battleCardTextEmpty}>[ VIDE / EN ATTENTE ]</Text>
-              )}
-            </View>
 
-            {/* Quote 2 (Yellow) Status */}
-            <View style={[adminStyles.battleCard, { borderColor: '#fcd53f' }]}>
-              <Text style={[adminStyles.battleCardTitle, { color: '#fcd53f' }]}>QUOTE 2 (JAUNE)</Text>
-              {activeQuotes?.q2 ? (
-                <>
-                  <Text style={adminStyles.battleCardText} numberOfLines={3}>
-                    "{activeQuotes.q2.text}"
-                  </Text>
-                  <Text style={adminStyles.battleCardAuthor}>— {activeQuotes.q2.author}</Text>
-                  <View style={adminStyles.voteIndicator}>
-                    <Text style={{ color: '#fcd53f', fontFamily: 'BebasNeue', fontSize: 18 }}>
-                      {votes?.q2 || 0} VOTE(S) ({q2Percent}%)
-                    </Text>
-                  </View>
-                </>
-              ) : (
-                <Text style={adminStyles.battleCardTextEmpty}>[ VIDE / EN ATTENTE ]</Text>
-              )}
-            </View>
-          </View>
-        </View>
-
-        {/* 10 PRE-DEFINED CHAMPIONS */}
-        <View style={[adminStyles.sectionContainer, { marginTop: 15 }]}>
-          <TouchableOpacity
-            style={adminStyles.predefinedHeader}
-            onPress={() => setShowPredefined(!showPredefined)}
-            activeOpacity={0.7}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <MaterialCommunityIcons name="sword" size={20} color="#ff3b30" style={{ marginRight: 8 }} />
-              <Text style={adminStyles.sectionTitle}>10 CHAMPIONNES DE DÉPART :</Text>
-            </View>
-            <Ionicons name={showPredefined ? "chevron-up" : "chevron-down"} size={20} color="#ff3b30" />
-          </TouchableOpacity>
-
-          {showPredefined && (
-            <View style={adminStyles.predefinedList}>
-              {PREDEFINED_QUOTES.map((item, idx) => (
-                <View key={idx} style={adminStyles.predefinedItem}>
-                  <Text style={adminStyles.predefinedText}>"{item.text}"</Text>
-                  <Text style={adminStyles.predefinedAuthor}>— {item.author}</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-                    <TouchableOpacity
-                      style={[adminStyles.approveButton, { flex: 1, marginRight: 5, backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}
-                      onPress={() => handleApprove(item.text, item.author, 'q1')}
-                    >
-                      <Text style={[adminStyles.approveButtonText, { color: '#ff3b30' }]}>SET Q1</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[adminStyles.approveButton, { flex: 1, marginLeft: 5, backgroundColor: 'rgba(252, 213, 63, 0.2)' }]}
-                      onPress={() => handleApprove(item.text, item.author, 'q2')}
-                    >
-                      <Text style={[adminStyles.approveButtonText, { color: '#fcd53f' }]}>SET Q2</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
-        {/* ADD MANUAL CUSTOM QUOTE */}
-        <View style={[adminStyles.sectionContainer, { marginTop: 20 }]}>
-          <Text style={adminStyles.sectionTitle}>AJOUTER UNE NOUVELLE CITATION :</Text>
-          <TextInput
-            style={modalStyles.input}
-            placeholder="Écris la nouvelle citation ici..."
-            placeholderTextColor="#888"
-            multiline
-            value={newQuoteText}
-            onChangeText={setNewQuoteText}
-          />
-          <TextInput
-            style={[modalStyles.input, { marginTop: 10, height: 50 }]}
-            placeholder="Auteur (ex: Sun Tzu)"
-            placeholderTextColor="#888"
-            value={newQuoteAuthor}
-            onChangeText={setNewQuoteAuthor}
-          />
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
-            <TouchableOpacity
-              style={[adminStyles.approveButton, { flex: 1, marginRight: 5, backgroundColor: 'rgba(255, 59, 48, 0.2)' }]}
-              onPress={() => handleApprove(newQuoteText, newQuoteAuthor, 'q1')}
-            >
-              <Text style={[adminStyles.approveButtonText, { color: '#ff3b30' }]}>SET Q1</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[adminStyles.approveButton, { flex: 1, marginLeft: 5, backgroundColor: 'rgba(252, 213, 63, 0.2)' }]}
-              onPress={() => handleApprove(newQuoteText, newQuoteAuthor, 'q2')}
-            >
-              <Text style={[adminStyles.approveButtonText, { color: '#fcd53f' }]}>SET Q2</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <Text style={[adminStyles.sectionTitle, { borderTopWidth: 1, borderTopColor: '#222', paddingTop: 20, marginTop: 25, marginBottom: 10 }]}>
-          CITATIONS SOUMISES :
-        </Text>
-      </View>
-    );
-  };
 
   return (
     <Modal visible={visible} transparent animationType="slide">
@@ -886,7 +966,21 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
               <FlatList
                 data={submissions}
                 keyExtractor={(item) => item.id.toString()}
-                ListHeaderComponent={renderHeader}
+                ListHeaderComponent={
+                  <AdminHeader
+                    activeQuotes={activeQuotes}
+                    votes={votes}
+                    q1Percent={q1Percent}
+                    q2Percent={q2Percent}
+                    showPredefined={showPredefined}
+                    setShowPredefined={setShowPredefined}
+                    newQuoteText={newQuoteText}
+                    setNewQuoteText={setNewQuoteText}
+                    newQuoteAuthor={newQuoteAuthor}
+                    setNewQuoteAuthor={setNewQuoteAuthor}
+                    handleApprove={handleApprove}
+                  />
+                }
                 showsVerticalScrollIndicator={false}
                 renderItem={({ item }) => {
                   const parts = item.quote.split(' — ');
