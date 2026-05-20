@@ -748,17 +748,7 @@ export default function App() {
                           pointerEvents="none"
                         />
 
-                        {/* Back Face Return button */}
-                        <TouchableOpacity
-                          style={styles.statsTrigger}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            toggleFlipQ1();
-                          }}
-                        >
-                          <MaterialCommunityIcons name="undo" size={14} color="#ff3b30" />
-                          <Text style={[styles.statsTriggerText, { color: '#ff3b30' }]}>RETOUR</Text>
-                        </TouchableOpacity>
+
 
                         {/* Combatant Stats content */}
                         <Text style={[styles.statsTitle, { color: '#ff3b30' }]}>FICHE TECHNIQUE</Text>
@@ -889,17 +879,7 @@ export default function App() {
                           pointerEvents="none"
                         />
 
-                        {/* Back Face Return button */}
-                        <TouchableOpacity
-                          style={styles.statsTrigger}
-                          onPress={(e) => {
-                            e.stopPropagation();
-                            toggleFlipQ2();
-                          }}
-                        >
-                          <MaterialCommunityIcons name="undo" size={14} color="#fcd53f" />
-                          <Text style={[styles.statsTriggerText, { color: '#fcd53f' }]}>RETOUR</Text>
-                        </TouchableOpacity>
+
 
                         {/* Combatant Stats content */}
                         <Text style={[styles.statsTitle, { color: '#fcd53f' }]}>FICHE TECHNIQUE</Text>
@@ -1860,8 +1840,8 @@ const styles = StyleSheet.create({
   },
   statsTrigger: {
     position: 'absolute',
-    top: 12,
-    right: 15,
+    bottom: 12,
+    left: 15,
     zIndex: 10,
     flexDirection: 'row',
     alignItems: 'center',
