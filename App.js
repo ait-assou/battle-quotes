@@ -11,6 +11,31 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 
+const getFighterClass = (author) => {
+  const name = (author || "ANONYME").toUpperCase();
+  if (name.includes("SUN TZU")) return "SAGE DE GUERRE";
+  if (name.includes("NIETZSCHE")) return "PHILOSOPHE IMPÉRIAL";
+  if (name.includes("MARC AURÈLE")) return "EMPEREUR STOÏQUE";
+  if (name.includes("CONFUCIUS")) return "MAÎTRE ZEN";
+  if (name.includes("GANDHI")) return "GUERRIER PACIFIQUE";
+  return "CHAMPION SOUMIS";
+};
+
+const getFighterEndurance = (text) => {
+  const val = (text || "").length;
+  return (val % 30) + 120; // range 120-150 HP
+};
+
+const getFighterRatio = (text) => {
+  const val = (text || "").length;
+  return (val % 20) + 68; // range 68-87 % win rate
+};
+
+const getFighterStreak = (text) => {
+  const val = (text || "").length;
+  return (val % 4) + 1; // range 1-4 round survival streak
+};
+
 export default function App() {
   let [fontsLoaded] = useFonts({
     BebasNeue: BebasNeue_400Regular,
@@ -33,6 +58,53 @@ export default function App() {
   const [tapCount, setTapCount] = useState(0);
   const [userNickname, setUserNickname] = useState('ANONYME');
   const [showNicknameModal, setShowNicknameModal] = useState(false);
+
+  // Card Flip States and Values
+  const [isFlippedQ1, setIsFlippedQ1] = useState(false);
+  const [isFlippedQ2, setIsFlippedQ2] = useState(false);
+  const flipQ1Val = useRef(new Animated.Value(0)).current;
+  const flipQ2Val = useRef(new Animated.Value(0)).current;
+
+  // Front & Back interpolations for 3D flip effect
+  const frontInterpolateQ1 = flipQ1Val.interpolate({
+    inputRange: [0, 180],
+    outputRange: ['0deg', '180deg']
+  });
+  const backInterpolateQ1 = flipQ1Val.interpolate({
+    inputRange: [0, 180],
+    outputRange: ['180deg', '360deg']
+  });
+
+  const frontInterpolateQ2 = flipQ2Val.interpolate({
+    inputRange: [0, 180],
+    outputRange: ['0deg', '180deg']
+  });
+  const backInterpolateQ2 = flipQ2Val.interpolate({
+    inputRange: [0, 180],
+    outputRange: ['180deg', '360deg']
+  });
+
+  const toggleFlipQ1 = () => {
+    const nextFlipped = !isFlippedQ1;
+    setIsFlippedQ1(nextFlipped);
+    Animated.spring(flipQ1Val, {
+      toValue: nextFlipped ? 180 : 0,
+      friction: 8,
+      tension: 10,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const toggleFlipQ2 = () => {
+    const nextFlipped = !isFlippedQ2;
+    setIsFlippedQ2(nextFlipped);
+    Animated.spring(flipQ2Val, {
+      toValue: nextFlipped ? 180 : 0,
+      friction: 8,
+      tension: 10,
+      useNativeDriver: true,
+    }).start();
+  };
 
   const vsScale = useRef(new Animated.Value(1)).current;
   const glowOpacity = useRef(new Animated.Value(0.4)).current;
@@ -277,6 +349,11 @@ export default function App() {
       const text = activeQuotes.q1.text || activeQuotes.q1;
       if (text !== prevQ1Text.current) {
         prevQ1Text.current = text;
+        
+        // Reset card flip to front face instantly
+        setIsFlippedQ1(false);
+        flipQ1Val.setValue(0);
+
         slideQ1Val.setValue(350); // slide Q1 in from the right
         Animated.spring(slideQ1Val, {
           toValue: 0,
@@ -293,6 +370,11 @@ export default function App() {
       const text = activeQuotes.q2.text || activeQuotes.q2;
       if (text !== prevQ2Text.current) {
         prevQ2Text.current = text;
+
+        // Reset card flip to front face instantly
+        setIsFlippedQ2(false);
+        flipQ2Val.setValue(0);
+
         slideQ2Val.setValue(-350); // slide Q2 in from the left
         Animated.spring(slideQ2Val, {
           toValue: 0,
@@ -512,35 +594,110 @@ export default function App() {
             ) : (
               <>
                 {/* Quote 1 */}
-                <Animated.View style={{ transform: [{ translateX: slideQ1Val }] }}>
-                  <TouchableOpacity 
-                    style={styles.quoteContainer} 
-                    onPress={() => handleVote('q1')} 
-                    activeOpacity={0.8}
-                  >
-                    {/* Pulsing Neon Border */}
+                <Animated.View style={{ transform: [{ translateX: slideQ1Val }], marginVertical: 6, marginHorizontal: 10 }}>
+                  <View style={{ position: 'relative' }}>
+                    {/* FRONT FACE */}
                     <Animated.View 
-                      style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]} 
-                      pointerEvents="none"
-                    />
-
-                    <View style={styles.quoteMarkContainerLeft}>
-                      <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>“</Text>
-                    </View>
-                    <Text
-                      style={[styles.quoteText, { color: '#ff3b30' }]}
+                      pointerEvents={isFlippedQ1 ? 'none' : 'auto'}
+                      style={[
+                        styles.cardFace,
+                        { transform: [{ rotateY: frontInterpolateQ1 }], backfaceVisibility: 'hidden' }
+                      ]}
                     >
-                      {activeQuotes.q1.text || activeQuotes.q1}
-                    </Text>
-                    {(activeQuotes.q1.author || false) && (
-                      <Text style={[styles.authorText, { color: 'rgba(255, 59, 48, 0.75)' }]}>
-                        — {activeQuotes.q1.author}
-                      </Text>
-                    )}
-                    <View style={styles.quoteMarkContainerRight}>
-                      <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>”</Text>
-                    </View>
-                  </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
+                        onPress={() => handleVote('q1')} 
+                        activeOpacity={0.8}
+                      >
+                        {/* Pulsing Neon Border */}
+                        <Animated.View 
+                          style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]} 
+                          pointerEvents="none"
+                        />
+
+                        {/* Stats Flip Trigger */}
+                        <TouchableOpacity 
+                          style={styles.statsTrigger} 
+                          onPress={(e) => {
+                            e.stopPropagation(); // prevent casting vote when clicking STATS!
+                            toggleFlipQ1();
+                          }}
+                        >
+                          <MaterialCommunityIcons name="chart-bar" size={14} color="#ff3b30" />
+                          <Text style={[styles.statsTriggerText, { color: '#ff3b30' }]}>STATS</Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.quoteMarkContainerLeft}>
+                          <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>“</Text>
+                        </View>
+                        <Text style={[styles.quoteText, { color: '#ff3b30' }]}>
+                          {activeQuotes.q1.text || activeQuotes.q1}
+                        </Text>
+                        {(activeQuotes.q1.author || false) && (
+                          <Text style={[styles.authorText, { color: 'rgba(255, 59, 48, 0.75)' }]}>
+                            — {activeQuotes.q1.author}
+                          </Text>
+                        )}
+                        <View style={styles.quoteMarkContainerRight}>
+                          <Text style={[styles.quoteMark, { color: 'rgba(255, 59, 48, 0.25)' }]}>”</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </Animated.View>
+
+                    {/* BACK FACE */}
+                    <Animated.View 
+                      pointerEvents={isFlippedQ1 ? 'auto' : 'none'}
+                      style={[
+                        styles.cardFace,
+                        styles.cardFaceBack,
+                        { transform: [{ rotateY: backInterpolateQ1 }], backfaceVisibility: 'hidden' }
+                      ]}
+                    >
+                      <TouchableOpacity 
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
+                        onPress={toggleFlipQ1} // click anywhere on back to flip it back!
+                        activeOpacity={0.9}
+                      >
+                        {/* Pulsing Neon Border */}
+                        <Animated.View 
+                          style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]} 
+                          pointerEvents="none"
+                        />
+
+                        {/* Back Face Return button */}
+                        <TouchableOpacity 
+                          style={styles.statsTrigger} 
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            toggleFlipQ1();
+                          }}
+                        >
+                          <MaterialCommunityIcons name="undo" size={14} color="#ff3b30" />
+                          <Text style={[styles.statsTriggerText, { color: '#ff3b30' }]}>RETOUR</Text>
+                        </TouchableOpacity>
+
+                        {/* Combatant Stats content */}
+                        <Text style={[styles.statsTitle, { color: '#ff3b30' }]}>FICHE TECHNIQUE</Text>
+                        
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>CLASSE :</Text>
+                          <Text style={[styles.statValue, { color: '#ff3b30' }]}>{getFighterClass(activeQuotes.q1.author)}</Text>
+                        </View>
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>ENDURANCE :</Text>
+                          <Text style={styles.statValue}>{getFighterEndurance(activeQuotes.q1.text)} HP</Text>
+                        </View>
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>RATIO VICTOIRE :</Text>
+                          <Text style={styles.statValue}>{getFighterRatio(activeQuotes.q1.text)}%</Text>
+                        </View>
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>SÉRIE DE VICTOIRES :</Text>
+                          <Text style={[styles.statValue, { color: '#ff3b30' }]}>🔥 {getFighterStreak(activeQuotes.q1.text)} SURVIES</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  </View>
                 </Animated.View>
 
                 {/* VS Divider */}
@@ -578,35 +735,110 @@ export default function App() {
                 </View>
 
                 {/* Quote 2 */}
-                <Animated.View style={{ transform: [{ translateX: slideQ2Val }] }}>
-                  <TouchableOpacity 
-                    style={styles.quoteContainer} 
-                    onPress={() => handleVote('q2')} 
-                    activeOpacity={0.8}
-                  >
-                    {/* Pulsing Neon Border */}
+                <Animated.View style={{ transform: [{ translateX: slideQ2Val }], marginVertical: 6, marginHorizontal: 10 }}>
+                  <View style={{ position: 'relative' }}>
+                    {/* FRONT FACE */}
                     <Animated.View 
-                      style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]} 
-                      pointerEvents="none"
-                    />
-
-                    <View style={styles.quoteMarkContainerLeft}>
-                      <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>“</Text>
-                    </View>
-                    <Text
-                      style={[styles.quoteText, { color: '#fcd53f' }]}
+                      pointerEvents={isFlippedQ2 ? 'none' : 'auto'}
+                      style={[
+                        styles.cardFace,
+                        { transform: [{ rotateY: frontInterpolateQ2 }], backfaceVisibility: 'hidden' }
+                      ]}
                     >
-                      {activeQuotes.q2.text || activeQuotes.q2}
-                    </Text>
-                    {(activeQuotes.q2.author || false) && (
-                      <Text style={[styles.authorText, { color: 'rgba(252, 213, 63, 0.75)' }]}>
-                        — {activeQuotes.q2.author}
-                      </Text>
-                    )}
-                    <View style={styles.quoteMarkContainerRight}>
-                      <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>”</Text>
-                    </View>
-                  </TouchableOpacity>
+                      <TouchableOpacity 
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
+                        onPress={() => handleVote('q2')} 
+                        activeOpacity={0.8}
+                      >
+                        {/* Pulsing Neon Border */}
+                        <Animated.View 
+                          style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]} 
+                          pointerEvents="none"
+                        />
+
+                        {/* Stats Flip Trigger */}
+                        <TouchableOpacity 
+                          style={styles.statsTrigger} 
+                          onPress={(e) => {
+                            e.stopPropagation(); // prevent casting vote when clicking STATS!
+                            toggleFlipQ2();
+                          }}
+                        >
+                          <MaterialCommunityIcons name="chart-bar" size={14} color="#fcd53f" />
+                          <Text style={[styles.statsTriggerText, { color: '#fcd53f' }]}>STATS</Text>
+                        </TouchableOpacity>
+
+                        <View style={styles.quoteMarkContainerLeft}>
+                          <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>“</Text>
+                        </View>
+                        <Text style={[styles.quoteText, { color: '#fcd53f' }]}>
+                          {activeQuotes.q2.text || activeQuotes.q2}
+                        </Text>
+                        {(activeQuotes.q2.author || false) && (
+                          <Text style={[styles.authorText, { color: 'rgba(252, 213, 63, 0.75)' }]}>
+                            — {activeQuotes.q2.author}
+                          </Text>
+                        )}
+                        <View style={styles.quoteMarkContainerRight}>
+                          <Text style={[styles.quoteMark, { color: 'rgba(252, 213, 63, 0.25)' }]}>”</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </Animated.View>
+
+                    {/* BACK FACE */}
+                    <Animated.View 
+                      pointerEvents={isFlippedQ2 ? 'auto' : 'none'}
+                      style={[
+                        styles.cardFace,
+                        styles.cardFaceBack,
+                        { transform: [{ rotateY: backInterpolateQ2 }], backfaceVisibility: 'hidden' }
+                      ]}
+                    >
+                      <TouchableOpacity 
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
+                        onPress={toggleFlipQ2} // click anywhere on back to flip it back!
+                        activeOpacity={0.9}
+                      >
+                        {/* Pulsing Neon Border */}
+                        <Animated.View 
+                          style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]} 
+                          pointerEvents="none"
+                        />
+
+                        {/* Back Face Return button */}
+                        <TouchableOpacity 
+                          style={styles.statsTrigger} 
+                          onPress={(e) => {
+                            e.stopPropagation();
+                            toggleFlipQ2();
+                          }}
+                        >
+                          <MaterialCommunityIcons name="undo" size={14} color="#fcd53f" />
+                          <Text style={[styles.statsTriggerText, { color: '#fcd53f' }]}>RETOUR</Text>
+                        </TouchableOpacity>
+
+                        {/* Combatant Stats content */}
+                        <Text style={[styles.statsTitle, { color: '#fcd53f' }]}>FICHE TECHNIQUE</Text>
+                        
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>CLASSE :</Text>
+                          <Text style={[styles.statValue, { color: '#fcd53f' }]}>{getFighterClass(activeQuotes.q2.author)}</Text>
+                        </View>
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>ENDURANCE :</Text>
+                          <Text style={styles.statValue}>{getFighterEndurance(activeQuotes.q2.text)} HP</Text>
+                        </View>
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>RATIO VICTOIRE :</Text>
+                          <Text style={styles.statValue}>{getFighterRatio(activeQuotes.q2.text)}%</Text>
+                        </View>
+                        <View style={styles.statRow}>
+                          <Text style={styles.statLabel}>SÉRIE DE VICTOIRES :</Text>
+                          <Text style={[styles.statValue, { color: '#fcd53f' }]}>🔥 {getFighterStreak(activeQuotes.q2.text)} SURVIES</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  </View>
                 </Animated.View>
               </>
             )}
@@ -1530,6 +1762,66 @@ const styles = StyleSheet.create({
     fontFamily: 'BebasNeue',
     fontSize: 70,
     lineHeight: 70,
+  },
+  cardFace: {
+    width: '100%',
+    backfaceVisibility: 'hidden',
+  },
+  cardFaceBack: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  statsTrigger: {
+    position: 'absolute',
+    top: 12,
+    right: 15,
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  statsTriggerText: {
+    fontFamily: 'BebasNeue',
+    fontSize: 11,
+    marginLeft: 4,
+    letterSpacing: 1,
+  },
+  statsTitle: {
+    fontFamily: 'BebasNeue',
+    fontSize: 22,
+    textAlign: 'center',
+    letterSpacing: 2,
+    marginBottom: 15,
+    textTransform: 'uppercase',
+  },
+  statRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.03)',
+    marginHorizontal: 10,
+  },
+  statLabel: {
+    fontFamily: 'BebasNeue',
+    fontSize: 14,
+    color: '#888888',
+    letterSpacing: 1.5,
+  },
+  statValue: {
+    fontFamily: 'BebasNeue',
+    fontSize: 14,
+    color: '#ffffff',
+    letterSpacing: 1.5,
   },
   vsContainer: {
     flexDirection: 'row',
