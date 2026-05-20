@@ -1608,7 +1608,11 @@ function BattleQuoteModal({ visible, onClose, onSubmit, results, nickname, showA
         >
           <View style={modalStyles.container}>
             {/* Main Modal Content */}
-            <TouchableOpacity style={modalStyles.closeBtn} onPress={onClose}>
+            <TouchableOpacity 
+              style={modalStyles.closeBtn} 
+              onPress={onClose}
+              hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+            >
               <Text style={modalStyles.closeText}>✕</Text>
             </TouchableOpacity>
 
@@ -2175,7 +2179,12 @@ const modalStyles = StyleSheet.create({
   closeBtn: {
     position: "absolute",
     top: 10,
-    right: 15
+    right: 10,
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
   },
   closeText: {
     color: "#ff3b3b",
@@ -2629,7 +2638,11 @@ function CalendarModal({ visible, onClose, showAlert }) {
     <Modal visible={visible} transparent animationType="slide">
       <View style={modalStyles.overlay}>
         <View style={[modalStyles.container, { padding: 20, maxHeight: '85%' }]}>
-          <TouchableOpacity style={[modalStyles.closeBtn, { zIndex: 10 }]} onPress={onClose}>
+          <TouchableOpacity 
+            style={[modalStyles.closeBtn, { zIndex: 10 }]} 
+            onPress={onClose}
+            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+          >
             <Text style={modalStyles.closeText}>✕</Text>
           </TouchableOpacity>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
