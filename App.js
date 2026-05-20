@@ -1,13 +1,23 @@
 import 'react-native-url-polyfill/auto';
 import React, { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, Animated, Easing, Dimensions, Platform, TouchableOpacity, TextInput, Alert, ActivityIndicator, Modal, FlatList, ImageBackground, PanResponder, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard } from 'react-native';
+import { StyleSheet, Text, View, Animated, Easing, Dimensions, Platform, TouchableOpacity, TextInput, Alert, ActivityIndicator, Modal, FlatList, ImageBackground, PanResponder, KeyboardAvoidingView, TouchableWithoutFeedback, Keyboard, ScrollView } from 'react-native';
 import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFonts, BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
 import { FontAwesome5, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { supabase } from './supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Calendar, LocaleConfig } from 'react-native-calendars';
+
+LocaleConfig.locales['fr'] = {
+  monthNames: ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'],
+  monthNamesShort: ['Janv.','Févr.','Mars','Avril','Mai','Juin','Juil.','Août','Sept.','Oct.','Nov.','Déc.'],
+  dayNames: ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'],
+  dayNamesShort: ['Dim.','Lun.','Mar.','Mer.','Jeu.','Ven.','Sam.'],
+  today: 'Aujourd\'hui'
+};
+LocaleConfig.defaultLocale = 'fr';
 
 const { width } = Dimensions.get('window');
 
@@ -58,6 +68,7 @@ export default function App() {
   const [tapCount, setTapCount] = useState(0);
   const [userNickname, setUserNickname] = useState('ANONYME');
   const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [isCalendarVisible, setIsCalendarVisible] = useState(false);
 
   // Card Flip States and Values
   const [isFlippedQ1, setIsFlippedQ1] = useState(false);
@@ -957,6 +968,13 @@ export default function App() {
             onSubmit={handleSaveNickname}
           />
 
+          <TouchableOpacity 
+            style={styles.calendarBtn}
+            onPress={() => setIsCalendarVisible(true)}
+          >
+            <Ionicons name="calendar" size={24} color="#fcd53f" />
+          </TouchableOpacity>
+
           {/* Admin Gear Button - Only visible to Admins */}
           {isAdmin && (
             <TouchableOpacity
@@ -978,6 +996,11 @@ export default function App() {
           <LoginModal
             visible={isLoginVisible}
             onClose={() => setIsLoginVisible(false)}
+          />
+
+          <CalendarModal 
+            visible={isCalendarVisible}
+            onClose={() => setIsCalendarVisible(false)}
           />
         </SafeAreaView>
         <StatusBar style="light" />
@@ -1953,10 +1976,20 @@ const styles = StyleSheet.create({
   adminGear: {
     position: 'absolute',
     bottom: 20,
+    left: 20,
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 20,
+  },
+  calendarBtn: {
+    position: 'absolute',
+    bottom: 20,
     right: 20,
     padding: 10,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(252, 213, 63, 0.3)',
   },
   bottomInstructionContainer: {
     flexDirection: 'row',
@@ -2473,4 +2506,154 @@ const adminStyles = StyleSheet.create({
     marginTop: 4,
   },
 });
+
+// -- Calendar Modal Component --
+const getMockBattleForDate = (targetDateString) => {
+  const quotes = [
+    { text: "L'art suprême de la guerre est de soumettre l'ennemi sans combattre.", author: "SUN TZU" },
+    { text: "Ce qui ne me tue pas me rend plus fort.", author: "FRIEDRICH NIETZSCHE" },
+    { text: "La meilleure vengeance est de ne pas ressembler à celui qui cause la blessure.", author: "MARC AURÈLE" },
+    { text: "Exige beaucoup de toi-même et attends peu des autres.", author: "CONFUCIUS" },
+    { text: "La force ne vient pas des capacités physiques, elle vient d'une volonté invincible.", author: "GANDHI" },
+    { text: "Il est plus difficile de vaincre ses passions que de vaincre le monde.", author: "ALEXANDRE LE GRAND" },
+    { text: "Un voyage de mille lieues commence toujours par un premier pas.", author: "LAO TSEU" },
+    { text: "L'enfer, c'est les autres.", author: "JEAN-PAUL SARTRE" },
+    { text: "Je pense, donc je suis.", author: "RENÉ DESCARTES" },
+    { text: "Le courage n'est pas l'absence de peur, mais la capacité de la vaincre.", author: "NELSON MANDELA" }
+  ];
+
+  const epoch = new Date('2026-01-01T00:00:00Z');
+  const targetDate = new Date(targetDateString + 'T00:00:00Z');
+  
+  if (targetDate < epoch) {
+    return null;
+  }
+
+  const diffTime = targetDate.getTime() - epoch.getTime();
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+  let currentChampion = quotes[0];
+  let currentChallengerIndex = 1;
+  let battleResult = null;
+
+  for (let i = 0; i <= diffDays; i++) {
+    const currentChallenger = quotes[currentChallengerIndex % quotes.length];
+    
+    // Deterministic simulation for day `i`
+    const hash = (i * 13) % 100;
+    
+    // Challenger wins if hash < 35 (35% win rate for challenger)
+    const challengerWins = hash < 35;
+    
+    let champPercent, challPercent;
+    if (challengerWins) {
+      challPercent = 51 + (hash % 15);
+      champPercent = 100 - challPercent;
+    } else {
+      champPercent = 51 + (hash % 20);
+      challPercent = 100 - champPercent;
+    }
+
+    battleResult = {
+      q1: currentChampion,
+      q2: currentChallenger,
+      q1Percent: champPercent,
+      q2Percent: challPercent,
+      winner: challengerWins ? 'q2' : 'q1'
+    };
+
+    if (challengerWins) {
+      currentChampion = currentChallenger;
+    }
+    currentChallengerIndex++;
+  }
+
+  return battleResult;
+};
+
+function CalendarModal({ visible, onClose }) {
+  const [selectedDate, setSelectedDate] = useState('');
+  const [battleOfDay, setBattleOfDay] = useState(null);
+
+  const handleDayPress = (day) => {
+    const today = new Date().toISOString().split('T')[0];
+    if (day.dateString > today) {
+      Alert.alert('Mystère', 'Ce combat n\'a pas encore eu lieu !');
+      return;
+    }
+    setSelectedDate(day.dateString);
+    setBattleOfDay(getMockBattleForDate(day.dateString));
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide">
+      <View style={modalStyles.overlay}>
+        <View style={[modalStyles.container, { padding: 20, maxHeight: '85%' }]}>
+          <TouchableOpacity style={[modalStyles.closeBtn, { zIndex: 10 }]} onPress={onClose}>
+            <Text style={modalStyles.closeText}>✕</Text>
+          </TouchableOpacity>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+            <Text style={modalStyles.title}>📅 ARCHIVES DES COMBATS</Text>
+
+            <Calendar
+              onDayPress={handleDayPress}
+              maxDate={new Date().toISOString().split('T')[0]}
+              markedDates={{
+                [selectedDate]: { selected: true, selectedColor: '#ff3b30' }
+              }}
+              theme={{
+                backgroundColor: '#0a0a0a',
+                calendarBackground: '#0a0a0a',
+                textSectionTitleColor: '#a0a0a0',
+                selectedDayBackgroundColor: '#ff3b30',
+                selectedDayTextColor: '#ffffff',
+                todayTextColor: '#fcd53f',
+                dayTextColor: '#ffffff',
+                textDisabledColor: '#333333',
+                dotColor: '#ff3b30',
+                selectedDotColor: '#ffffff',
+                arrowColor: '#ff3b30',
+                monthTextColor: '#ffffff',
+                indicatorColor: '#ff3b30',
+                textDayFontFamily: 'BebasNeue',
+                textMonthFontFamily: 'BebasNeue',
+                textDayHeaderFontFamily: 'BebasNeue',
+                textMonthFontWeight: 'bold',
+                textDayFontSize: 16,
+                textMonthFontSize: 24,
+                textDayHeaderFontSize: 14
+              }}
+            />
+
+            {battleOfDay && (
+              <View style={{ marginTop: 20 }}>
+                <Text style={{ fontFamily: 'BebasNeue', color: '#ff3b30', fontSize: 18, textAlign: 'center', marginBottom: 10 }}>
+                  COMBAT DU {selectedDate}
+                </Text>
+
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1, padding: 10, backgroundColor: '#111', borderRadius: 8, borderWidth: 1, borderColor: battleOfDay.winner === 'q1' ? '#ff3b30' : '#222' }}>
+                    <Text style={{ color: '#fff', fontStyle: 'italic', fontSize: 12 }}>"{battleOfDay.q1.text}"</Text>
+                    <Text style={{ fontFamily: 'BebasNeue', color: '#a0a0a0', marginTop: 5, fontSize: 12 }}>— {battleOfDay.q1.author}</Text>
+                    <Text style={{ fontFamily: 'BebasNeue', color: battleOfDay.winner === 'q1' ? '#ff3b30' : '#888', marginTop: 5, fontSize: 16 }}>{battleOfDay.q1Percent}%</Text>
+                  </View>
+                  
+                  <View style={{ justifyContent: 'center', paddingHorizontal: 5 }}>
+                    <Text style={{ fontFamily: 'BebasNeue', color: '#fcd53f', fontSize: 20 }}>VS</Text>
+                  </View>
+
+                  <View style={{ flex: 1, padding: 10, backgroundColor: '#111', borderRadius: 8, borderWidth: 1, borderColor: battleOfDay.winner === 'q2' ? '#fcd53f' : '#222' }}>
+                    <Text style={{ color: '#fff', fontStyle: 'italic', fontSize: 12 }}>"{battleOfDay.q2.text}"</Text>
+                    <Text style={{ fontFamily: 'BebasNeue', color: '#a0a0a0', marginTop: 5, fontSize: 12 }}>— {battleOfDay.q2.author}</Text>
+                    <Text style={{ fontFamily: 'BebasNeue', color: battleOfDay.winner === 'q2' ? '#fcd53f' : '#888', marginTop: 5, fontSize: 16 }}>{battleOfDay.q2Percent}%</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
