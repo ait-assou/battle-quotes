@@ -69,6 +69,16 @@ export default function App() {
   const [userNickname, setUserNickname] = useState('ANONYME');
   const [showNicknameModal, setShowNicknameModal] = useState(false);
   const [isCalendarVisible, setIsCalendarVisible] = useState(false);
+  const [alertConfig, setAlertConfig] = useState({ visible: false, title: '', message: '', buttons: [] });
+
+  const showAlert = (title, message, buttons = [{ text: 'OK' }]) => {
+    setAlertConfig({ visible: true, title, message, buttons });
+  };
+
+  const hideAlert = () => {
+    setAlertConfig(prev => ({ ...prev, visible: false }));
+  };
+
 
   // Card Flip States and Values
   const [isFlippedQ1, setIsFlippedQ1] = useState(false);
@@ -451,7 +461,7 @@ export default function App() {
 
   const submitCustomQuote = async (quoteText) => {
     if (!quoteText || !quoteText.trim()) {
-      Alert.alert('Erreur', 'Veuillez entrer une citation.');
+      showAlert('Erreur', 'Veuillez entrer une citation.');
       return;
     }
     setIsSubmitting(true);
@@ -466,7 +476,7 @@ export default function App() {
         .ilike('quote', `%${cleanQuote}%`);
 
       if (!checkError && existing && existing.length > 0) {
-        Alert.alert('Doublon', 'Cette citation a déjà été partagée ! Proposez-en une autre.');
+        showAlert('Doublon', 'Cette citation a déjà été partagée ! Proposez-en une autre.');
         return;
       }
 
@@ -474,7 +484,7 @@ export default function App() {
       if (error) throw error;
       setQuoteSubmitted(true);
     } catch (error) {
-      Alert.alert('Erreur', 'Impossible de soumettre la citation.');
+      showAlert('Erreur', 'Impossible de soumettre la citation.');
       console.log('Submit error:', error);
     } finally {
       setIsSubmitting(false);
@@ -483,7 +493,7 @@ export default function App() {
 
   const handleSaveNickname = async (nickname) => {
     if (!nickname || !nickname.trim()) {
-      Alert.alert('Erreur', 'Veuillez entrer un surnom.');
+      showAlert('Erreur', 'Veuillez entrer un surnom.');
       return;
     }
     const cleanNickname = nickname.trim().toUpperCase();
@@ -493,7 +503,7 @@ export default function App() {
       setShowNicknameModal(false);
     } catch (e) {
       console.log('Error saving nickname:', e);
-      Alert.alert('Erreur', 'Impossible d\'enregistrer le surnom.');
+      showAlert('Erreur', 'Impossible d\'enregistrer le surnom.');
     }
   };
 
@@ -576,7 +586,7 @@ export default function App() {
       otherQuote.text &&
       otherQuote.text.trim().toLowerCase() === quoteText.trim().toLowerCase()
     ) {
-      Alert.alert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
+      showAlert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
       return;
     }
 
@@ -586,7 +596,7 @@ export default function App() {
     if (voteQ1 !== voteQ2) {
       const winnerSlot = voteQ1 > voteQ2 ? 'q1' : 'q2';
       if (slot === winnerSlot) {
-        Alert.alert(
+        showAlert(
           'Action Bloquée',
           `La citation de la Quote ${slot === 'q1' ? '1' : '2'} est actuellement gagnante ! Vous ne pouvez remplacer que la citation vaincue.`
         );
@@ -943,6 +953,7 @@ export default function App() {
             </View>
 
             <BattleQuoteModal
+              showAlert={showAlert}
               visible={isModalVisible}
               onClose={() => setIsModalVisible(false)}
               results={{ q1: q1Percent, q2: q2Percent }}
@@ -952,6 +963,7 @@ export default function App() {
           </View>
 
           <OnboardingModal
+            showAlert={showAlert}
             visible={showOnboarding}
             onClose={async () => {
               setShowOnboarding(false);
@@ -964,6 +976,7 @@ export default function App() {
           />
 
           <NicknameModal
+            showAlert={showAlert}
             visible={showNicknameModal}
             onSubmit={handleSaveNickname}
           />
@@ -994,13 +1007,22 @@ export default function App() {
           />
 
           <LoginModal
+            showAlert={showAlert}
             visible={isLoginVisible}
             onClose={() => setIsLoginVisible(false)}
           />
 
           <CalendarModal 
+            showAlert={showAlert}
             visible={isCalendarVisible}
             onClose={() => setIsCalendarVisible(false)}
+          />
+          <CustomAlertModal
+            visible={alertConfig.visible}
+            title={alertConfig.title}
+            message={alertConfig.message}
+            buttons={alertConfig.buttons}
+            onClose={hideAlert}
           />
         </SafeAreaView>
         <StatusBar style="light" />
@@ -1009,7 +1031,7 @@ export default function App() {
   );
 }
 
-function LoginModal({ visible, onClose }) {
+function LoginModal({ visible, onClose, showAlert }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1024,9 +1046,9 @@ function LoginModal({ visible, onClose }) {
       });
       if (error) throw error;
       onClose();
-      Alert.alert("Succès", "Vous êtes maintenant connecté en tant qu'administrateur.");
+      showAlert("Succès", "Vous êtes maintenant connecté en tant qu'administrateur.");
     } catch (e) {
-      Alert.alert("Erreur", "Identifiants invalides.");
+      showAlert("Erreur", "Identifiants invalides.");
       console.log("Login error:", e);
     } finally {
       setLoading(false);
@@ -1239,6 +1261,15 @@ function AdminHeader({
 }
 
 function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes }) {
+  const [localAlertConfig, setLocalAlertConfig] = useState({ visible: false, title: '', message: '', buttons: [] });
+
+  const showAlert = (title, message, buttons = [{ text: 'OK' }]) => {
+    setLocalAlertConfig({ visible: true, title, message, buttons });
+  };
+
+  const hideLocalAlert = () => {
+    setLocalAlertConfig(prev => ({ ...prev, visible: false }));
+  };
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [newQuoteText, setNewQuoteText] = useState("");
@@ -1261,7 +1292,7 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
 
       if (error) {
         if (error.code === 'PGRST116' || error.message.includes('not found')) {
-          Alert.alert('Configuration Requise', 'La table "user_quotes" n\'existe pas encore dans votre base Supabase.');
+          showAlert('Configuration Requise', 'La table "user_quotes" n\'existe pas encore dans votre base Supabase.');
         } else {
           throw error;
         }
@@ -1269,7 +1300,7 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
       setSubmissions(data || []);
     } catch (e) {
       console.log('Error fetching submissions:', e);
-      Alert.alert('Erreur', 'Impossible de charger les citations. Vérifiez votre connexion ou la configuration de votre base.');
+      showAlert('Erreur', 'Impossible de charger les citations. Vérifiez votre connexion ou la configuration de votre base.');
     } finally {
       setLoading(false);
     }
@@ -1277,7 +1308,7 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
 
   const handleApprove = (quoteText, authorText, slot) => {
     if (!quoteText || !quoteText.trim()) {
-      Alert.alert('Erreur', 'Veuillez entrer une citation.');
+      showAlert('Erreur', 'Veuillez entrer une citation.');
       return;
     }
 
@@ -1289,25 +1320,27 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
       otherQuote.text &&
       otherQuote.text.trim().toLowerCase() === quoteText.trim().toLowerCase()
     ) {
-      Alert.alert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
+      showAlert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
       return;
     }
 
     // Check if the admin is trying to replace the winning quote
+    const totalVotes = (votes?.q1 || 0) + (votes?.q2 || 0);
     const voteQ1 = votes?.q1 || 0;
     const voteQ2 = votes?.q2 || 0;
-    if (voteQ1 !== voteQ2) {
+    if (totalVotes > 0 && voteQ1 !== voteQ2) {
       const winnerSlot = voteQ1 > voteQ2 ? 'q1' : 'q2';
       if (slot === winnerSlot) {
-        Alert.alert(
+        const winnerPercent = Math.round(((winnerSlot === 'q1' ? voteQ1 : voteQ2) / totalVotes) * 100);
+        showAlert(
           'Action Bloquée',
-          `La citation de la Quote ${slot === 'q1' ? '1' : '2'} est actuellement gagnante ! Vous ne pouvez remplacer que la citation vaincue.`
+          `La citation de la Quote ${slot === 'q1' ? '1' : '2'} est actuellement gagnante avec ${winnerPercent}% des votes ! Vous ne pouvez remplacer que la citation vaincue.`
         );
         return;
       }
     }
 
-    Alert.alert(
+    showAlert(
       'Confirmer',
       `Voulez-vous définir cette citation comme Quote ${slot === 'q1' ? '1 (Rouge)' : '2 (Jaune)'} ?\n\n"${quoteText}"\n— ${authorText || 'ANONYME'}`,
       [
@@ -1318,7 +1351,7 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
             onSetQuote(quoteText, authorText, slot);
             setNewQuoteText(""); // clear input
             setNewQuoteAuthor("");
-            Alert.alert('Succès', `La citation a été définie pour la Quote ${slot === 'q1' ? '1' : '2'} !`);
+            showAlert('Succès', `La citation a été définie pour la Quote ${slot === 'q1' ? '1' : '2'} !`);
           }
         }
       ]
@@ -1344,14 +1377,13 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <TouchableOpacity
                   onPress={async () => {
-                    Alert.alert(
+                    showAlert(
                       "Déconnexion",
                       "Voulez-vous vous déconnecter du panel Admin ?",
                       [
                         { text: "Annuler", style: "cancel" },
                         {
                           text: "Déconnexion",
-                          style: "destructive",
                           onPress: async () => {
                             await supabase.auth.signOut();
                             onClose();
@@ -1427,11 +1459,19 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
           </View>
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
+
+      <CustomAlertModal
+        visible={localAlertConfig.visible}
+        title={localAlertConfig.title}
+        message={localAlertConfig.message}
+        buttons={localAlertConfig.buttons}
+        onClose={hideLocalAlert}
+      />
     </Modal>
   );
 }
 
-function OnboardingModal({ visible, onClose }) {
+function OnboardingModal({ visible, onClose, showAlert }) {
   const [step, setStep] = useState(0);
   const flatListRef = useRef(null);
 
@@ -1533,7 +1573,7 @@ function OnboardingModal({ visible, onClose }) {
   );
 }
 
-function BattleQuoteModal({ visible, onClose, onSubmit, results, nickname }) {
+function BattleQuoteModal({ visible, onClose, onSubmit, results, nickname, showAlert }) {
   const [quote, setQuote] = useState("");
   const riseAnim = useRef(new Animated.Value(500)).current;
 
@@ -1628,12 +1668,12 @@ function BattleQuoteModal({ visible, onClose, onSubmit, results, nickname }) {
   );
 }
 
-function NicknameModal({ visible, onSubmit }) {
+function NicknameModal({ visible, onSubmit, showAlert }) {
   const [nickname, setNickname] = useState("");
 
   const handleSubmit = () => {
     if (!nickname.trim()) {
-      Alert.alert("Erreur", "Veuillez entrer un surnom.");
+      showAlert("Erreur", "Veuillez entrer un surnom.");
       return;
     }
     onSubmit(nickname);
@@ -2571,14 +2611,14 @@ const getMockBattleForDate = (targetDateString) => {
   return battleResult;
 };
 
-function CalendarModal({ visible, onClose }) {
+function CalendarModal({ visible, onClose, showAlert }) {
   const [selectedDate, setSelectedDate] = useState('');
   const [battleOfDay, setBattleOfDay] = useState(null);
 
   const handleDayPress = (day) => {
     const today = new Date().toISOString().split('T')[0];
     if (day.dateString > today) {
-      Alert.alert('Mystère', 'Ce combat n\'a pas encore eu lieu !');
+      showAlert('Mystère', 'Ce combat n\'a pas encore eu lieu !');
       return;
     }
     setSelectedDate(day.dateString);
@@ -2657,3 +2697,41 @@ function CalendarModal({ visible, onClose }) {
   );
 }
 
+
+
+function CustomAlertModal({ visible, title, message, buttons, onClose }) {
+  const renderedButtons = buttons && buttons.length > 0 ? buttons : [{ text: 'OK' }];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View style={modalStyles.overlay}>
+        <View style={[modalStyles.container, { padding: 25, maxWidth: 350, borderWidth: 2, borderColor: '#ff3b30' }]}>
+          <Text style={[modalStyles.title, { fontSize: 24, marginBottom: 15, color: '#ff3b30' }]}>{title}</Text>
+          <Text style={[modalStyles.description, { color: '#ccc', fontSize: 16, lineHeight: 22 }]}>{message}</Text>
+          
+          <View style={{ flexDirection: 'row', justifyContent: 'space-around', marginTop: 10 }}>
+            {renderedButtons.map((btn, idx) => (
+              <TouchableOpacity 
+                key={idx}
+                style={[
+                  modalStyles.button, 
+                  { 
+                    flex: 1, 
+                    marginHorizontal: 5,
+                    backgroundColor: btn.style === 'cancel' ? '#333' : '#ff3b30'
+                  }
+                ]} 
+                onPress={() => {
+                  if (btn.onPress) btn.onPress();
+                  onClose();
+                }}
+              >
+                <Text style={[modalStyles.buttonText, { color: btn.style === 'cancel' ? '#ccc' : '#fff' }]}>{btn.text}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
