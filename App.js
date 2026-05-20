@@ -2637,7 +2637,7 @@ function CalendarModal({ visible, onClose, showAlert }) {
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={modalStyles.overlay}>
-        <View style={[modalStyles.container, { padding: 20, maxHeight: '85%' }]}>
+        <View style={[modalStyles.container, { width: '95%', paddingHorizontal: 10, paddingVertical: 20, overflow: 'hidden' }]}>
           <TouchableOpacity 
             style={[modalStyles.closeBtn, { zIndex: 10 }]} 
             onPress={onClose}
@@ -2645,8 +2645,8 @@ function CalendarModal({ visible, onClose, showAlert }) {
           >
             <Text style={modalStyles.closeText}>✕</Text>
           </TouchableOpacity>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
-            <Text style={modalStyles.title}>📅 ARCHIVES DES COMBATS</Text>
+          <View style={{ width: '100%', paddingBottom: 10 }}>
+            <Text style={[modalStyles.title, { fontSize: 20 }]}>📅 ARCHIVES DES COMBATS</Text>
 
             <Calendar
               onDayPress={handleDayPress}
@@ -2673,13 +2673,13 @@ function CalendarModal({ visible, onClose, showAlert }) {
                 textDayHeaderFontFamily: 'BebasNeue',
                 textMonthFontWeight: 'bold',
                 textDayFontSize: 16,
-                textMonthFontSize: 24,
+                textMonthFontSize: 18,
                 textDayHeaderFontSize: 14
               }}
             />
 
             {battleOfDay && (
-              <View style={{ marginTop: 20 }}>
+              <View style={{ marginTop: 20, paddingHorizontal: 10 }}>
                 <Text style={{ fontFamily: 'BebasNeue', color: '#ff3b30', fontSize: 18, textAlign: 'center', marginBottom: 10 }}>
                   COMBAT DU {selectedDate}
                 </Text>
@@ -2703,7 +2703,7 @@ function CalendarModal({ visible, onClose, showAlert }) {
                 </View>
               </View>
             )}
-          </ScrollView>
+          </View>
         </View>
       </View>
     </Modal>
