@@ -110,6 +110,17 @@ export default function App() {
   const glowOpacity = useRef(new Animated.Value(0.4)).current;
   const instructionOpacity = useRef(new Animated.Value(1)).current;
 
+  // Fake voting simulation refs
+  const simTimerRef = useRef(null);
+  const simIntervalRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (simTimerRef.current) clearTimeout(simTimerRef.current);
+      if (simIntervalRef.current) clearTimeout(simIntervalRef.current);
+    };
+  }, []);
+
   // Neon card pulsing border animation values
   const glowQ1Val = useRef(new Animated.Value(0.4)).current;
   const glowQ2Val = useRef(new Animated.Value(0.4)).current;
@@ -349,7 +360,7 @@ export default function App() {
       const text = activeQuotes.q1.text || activeQuotes.q1;
       if (text !== prevQ1Text.current) {
         prevQ1Text.current = text;
-        
+
         // Reset card flip to front face instantly
         setIsFlippedQ1(false);
         flipQ1Val.setValue(0);
@@ -475,15 +486,83 @@ export default function App() {
     }
   };
 
+  const startFakeVotingSimulation = () => {
+    // 1. Choose a random delay between 15 and 180 seconds
+    const randomDelaySeconds = Math.floor(Math.random() * (180 - 15 + 1)) + 15;
+    console.log(`[SIMULATOR] Scheduling fake votes simulation to start in ${randomDelaySeconds} seconds...`);
+    
+    // Clear any existing active simulation timers to prevent overlap
+    if (simTimerRef.current) clearTimeout(simTimerRef.current);
+    if (simIntervalRef.current) clearTimeout(simIntervalRef.current);
+
+    simTimerRef.current = setTimeout(async () => {
+      // 2. Choose a random number of votes to simulate (between 10 and 50 votes)
+      const numVotes = Math.floor(Math.random() * (50 - 10 + 1)) + 10;
+      console.log(`[SIMULATOR] Starting simulation of ${numVotes} fake user votes...`);
+      
+      let votesCast = 0;
+      // 3. Lay out these votes over short random intervals (cast a vote every 1.5 to 5.5 seconds)
+      const castNextVote = async () => {
+        if (votesCast >= numVotes) {
+          console.log(`[SIMULATOR] Finished simulating ${numVotes} votes!`);
+          return;
+        }
+
+        votesCast++;
+        const choice = Math.random() > 0.5 ? 'q1' : 'q2';
+        
+        try {
+          await supabase.from('votes').insert([{ quote_id: choice }]);
+          
+          // Fetch accurate DB totals and broadcast to ALL users
+          const { data: votesData, error: countErr } = await supabase
+            .from('votes')
+            .select('quote_id');
+
+          if (!countErr && votesData) {
+            let q1Count = 0;
+            let q2Count = 0;
+            votesData.forEach(v => {
+              if (v.quote_id === 'q1') q1Count++;
+              if (v.quote_id === 'q2') q2Count++;
+            });
+            const accurateVotes = { q1: q1Count, q2: q2Count };
+            setVotes(accurateVotes);
+
+            // Broadcast accurate counts to every connected user instantly
+            if (broadcastChannelRef.current) {
+              broadcastChannelRef.current.send({
+                type: 'broadcast',
+                event: 'vote_cast',
+                payload: accurateVotes,
+              });
+            }
+          }
+          console.log(`[SIMULATOR] Cast simulated vote ${votesCast}/${numVotes} for ${choice}`);
+        } catch (err) {
+          console.log('[SIMULATOR] Error inserting simulated vote:', err);
+        }
+
+        // Schedule next vote after a short random interval (e.g. 1500ms to 5500ms)
+        const nextVoteInterval = Math.floor(Math.random() * (5500 - 1500 + 1)) + 1500;
+        simIntervalRef.current = setTimeout(castNextVote, nextVoteInterval);
+      };
+
+      // Start the cascading vote simulation
+      castNextVote();
+
+    }, randomDelaySeconds * 1000);
+  };
+
   const handleSetQuote = async (quoteText, authorText, slot) => {
     const author = authorText || "ANONYME";
-    
+
     // Check if the other slot already has the exact same quote text to prevent duplicates in active combat
     const otherSlot = slot === 'q1' ? 'q2' : 'q1';
     const otherQuote = activeQuotes[otherSlot];
     if (
-      otherQuote && 
-      otherQuote.text && 
+      otherQuote &&
+      otherQuote.text &&
       otherQuote.text.trim().toLowerCase() === quoteText.trim().toLowerCase()
     ) {
       Alert.alert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
@@ -508,6 +587,11 @@ export default function App() {
     setActiveQuotes(newQuotes);
     setVotes({ q1: 0, q2: 0 });
     setHasVoted(false);
+
+    // Start fake voter simulation if both quotes are active
+    if (newQuotes.q1 && newQuotes.q2) {
+      startFakeVotingSimulation();
+    }
 
     // --- INSTANT BROADCAST to all connected users ---
     if (broadcastChannelRef.current) {
@@ -597,27 +681,27 @@ export default function App() {
                 <Animated.View style={{ transform: [{ translateX: slideQ1Val }], marginVertical: 6, marginHorizontal: 10 }}>
                   <View style={{ position: 'relative' }}>
                     {/* FRONT FACE */}
-                    <Animated.View 
+                    <Animated.View
                       pointerEvents={isFlippedQ1 ? 'none' : 'auto'}
                       style={[
                         styles.cardFace,
                         { transform: [{ rotateY: frontInterpolateQ1 }], backfaceVisibility: 'hidden' }
                       ]}
                     >
-                      <TouchableOpacity 
-                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
-                        onPress={() => handleVote('q1')} 
+                      <TouchableOpacity
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]}
+                        onPress={() => handleVote('q1')}
                         activeOpacity={0.8}
                       >
                         {/* Pulsing Neon Border */}
-                        <Animated.View 
-                          style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]} 
+                        <Animated.View
+                          style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]}
                           pointerEvents="none"
                         />
 
                         {/* Stats Flip Trigger */}
-                        <TouchableOpacity 
-                          style={styles.statsTrigger} 
+                        <TouchableOpacity
+                          style={styles.statsTrigger}
                           onPress={(e) => {
                             e.stopPropagation(); // prevent casting vote when clicking STATS!
                             toggleFlipQ1();
@@ -645,7 +729,7 @@ export default function App() {
                     </Animated.View>
 
                     {/* BACK FACE */}
-                    <Animated.View 
+                    <Animated.View
                       pointerEvents={isFlippedQ1 ? 'auto' : 'none'}
                       style={[
                         styles.cardFace,
@@ -653,20 +737,20 @@ export default function App() {
                         { transform: [{ rotateY: backInterpolateQ1 }], backfaceVisibility: 'hidden' }
                       ]}
                     >
-                      <TouchableOpacity 
-                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
+                      <TouchableOpacity
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]}
                         onPress={toggleFlipQ1} // click anywhere on back to flip it back!
                         activeOpacity={0.9}
                       >
                         {/* Pulsing Neon Border */}
-                        <Animated.View 
-                          style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]} 
+                        <Animated.View
+                          style={[styles.glowBorder, styles.quoteCardQ1, { opacity: glowQ1Val }]}
                           pointerEvents="none"
                         />
 
                         {/* Back Face Return button */}
-                        <TouchableOpacity 
-                          style={styles.statsTrigger} 
+                        <TouchableOpacity
+                          style={styles.statsTrigger}
                           onPress={(e) => {
                             e.stopPropagation();
                             toggleFlipQ1();
@@ -678,7 +762,7 @@ export default function App() {
 
                         {/* Combatant Stats content */}
                         <Text style={[styles.statsTitle, { color: '#ff3b30' }]}>FICHE TECHNIQUE</Text>
-                        
+
                         <View style={styles.statRow}>
                           <Text style={styles.statLabel}>CLASSE :</Text>
                           <Text style={[styles.statValue, { color: '#ff3b30' }]}>{getFighterClass(activeQuotes.q1.author)}</Text>
@@ -738,27 +822,27 @@ export default function App() {
                 <Animated.View style={{ transform: [{ translateX: slideQ2Val }], marginVertical: 6, marginHorizontal: 10 }}>
                   <View style={{ position: 'relative' }}>
                     {/* FRONT FACE */}
-                    <Animated.View 
+                    <Animated.View
                       pointerEvents={isFlippedQ2 ? 'none' : 'auto'}
                       style={[
                         styles.cardFace,
                         { transform: [{ rotateY: frontInterpolateQ2 }], backfaceVisibility: 'hidden' }
                       ]}
                     >
-                      <TouchableOpacity 
-                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
-                        onPress={() => handleVote('q2')} 
+                      <TouchableOpacity
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]}
+                        onPress={() => handleVote('q2')}
                         activeOpacity={0.8}
                       >
                         {/* Pulsing Neon Border */}
-                        <Animated.View 
-                          style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]} 
+                        <Animated.View
+                          style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]}
                           pointerEvents="none"
                         />
 
                         {/* Stats Flip Trigger */}
-                        <TouchableOpacity 
-                          style={styles.statsTrigger} 
+                        <TouchableOpacity
+                          style={styles.statsTrigger}
                           onPress={(e) => {
                             e.stopPropagation(); // prevent casting vote when clicking STATS!
                             toggleFlipQ2();
@@ -786,7 +870,7 @@ export default function App() {
                     </Animated.View>
 
                     {/* BACK FACE */}
-                    <Animated.View 
+                    <Animated.View
                       pointerEvents={isFlippedQ2 ? 'auto' : 'none'}
                       style={[
                         styles.cardFace,
@@ -794,20 +878,20 @@ export default function App() {
                         { transform: [{ rotateY: backInterpolateQ2 }], backfaceVisibility: 'hidden' }
                       ]}
                     >
-                      <TouchableOpacity 
-                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]} 
+                      <TouchableOpacity
+                        style={[styles.quoteContainer, { marginVertical: 0, marginHorizontal: 0 }]}
                         onPress={toggleFlipQ2} // click anywhere on back to flip it back!
                         activeOpacity={0.9}
                       >
                         {/* Pulsing Neon Border */}
-                        <Animated.View 
-                          style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]} 
+                        <Animated.View
+                          style={[styles.glowBorder, styles.quoteCardQ2, { opacity: glowQ2Val }]}
                           pointerEvents="none"
                         />
 
                         {/* Back Face Return button */}
-                        <TouchableOpacity 
-                          style={styles.statsTrigger} 
+                        <TouchableOpacity
+                          style={styles.statsTrigger}
                           onPress={(e) => {
                             e.stopPropagation();
                             toggleFlipQ2();
@@ -819,7 +903,7 @@ export default function App() {
 
                         {/* Combatant Stats content */}
                         <Text style={[styles.statsTitle, { color: '#fcd53f' }]}>FICHE TECHNIQUE</Text>
-                        
+
                         <View style={styles.statRow}>
                           <Text style={styles.statLabel}>CLASSE :</Text>
                           <Text style={[styles.statValue, { color: '#fcd53f' }]}>{getFighterClass(activeQuotes.q2.author)}</Text>
@@ -1198,8 +1282,8 @@ function AdminSettingsModal({ visible, onClose, onSetQuote, activeQuotes, votes 
     const otherSlot = slot === 'q1' ? 'q2' : 'q1';
     const otherQuote = activeQuotes[otherSlot];
     if (
-      otherQuote && 
-      otherQuote.text && 
+      otherQuote &&
+      otherQuote.text &&
       otherQuote.text.trim().toLowerCase() === quoteText.trim().toLowerCase()
     ) {
       Alert.alert('Doublon', 'Cette citation est déjà active dans l\'arène ! Sélectionnez un autre adversaire.');
